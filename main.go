@@ -8,6 +8,8 @@ import (
         "strings"
         "flag"
         "os"
+        "os/user"
+        "path"
         "encoding/json"
         "io/ioutil"
 
@@ -15,41 +17,70 @@ import (
 )
 
 const (
-  terminalBin = "kitty"
-  terminalNameFlag = "--name"
+  GROUP_SESS_DELIM = "_"
 )
 
 var (
+  terminalBin = "kitty"
+  terminalNameFlag = "--name"
+  host = "RPi"
   addMode = flag.Bool("add", false, "add window to current session group")
   detachMode = flag.Bool("detach", false, "detach current session group")
   resumeGroup = flag.String("resume", "", "resume session group")
-  resumeLayoutPath = flag.String("layout", "", "use layout to resume session group")
   listMode = flag.Bool("list", false, "list sessions groups")
 )
 
 type SessionsPerGroup map[string]map[string]bool
 
-func parseGroupSessFromCon(con *i3.Node) (string, string, error) {
-  conName := con.WindowProperties.Instance
-  split := strings.Split(conName, "_")
+func init() {
+  logwriter, err := syslog.New(syslog.LOG_DEBUG, "i3tmux")
+  if err != nil {
+    log.Fatal(err)
+  }
+  log.SetOutput(logwriter)
+  // Set logger to use syslog
+
+  user, err := user.Current()
+  if err != nil {
+    log.Fatal(err)
+  }
+  workingDir := path.Join(user.HomeDir,".config","i3tmux")
+  if err = os.Chdir(workingDir); err != nil {
+    log.Fatal(err)
+  }
+  // Chdir to ~/.config/i3tmux/
+}
+
+func encodeGroupSess(group string, session string) string {
+  return fmt.Sprintf("%s%s%s",group,GROUP_SESS_DELIM,session)
+}
+
+func parseGroupSessFromString(s string) (string, string, error) {
+  split := strings.Split(s, GROUP_SESS_DELIM)
   if len(split) != 2 {
-    return "", "", fmt.Errorf("name in unexpected format: %s", conName)
+    return "", "", fmt.Errorf("name in unexpected format: %s", s)
   }
   return split[0], split[1], nil
 }
 
+func parseGroupSessFromCon(con *i3.Node) (string, string, error) {
+  return parseGroupSessFromString(con.WindowProperties.Instance)
+}
+
 func fetchSessionsPerGroup(host string) (SessionsPerGroup, error) {
-  cmd := exec.Command("ssh", host, `tmux ls -F "#{session_group},#{session_name},#{session_id}"`)
+  cmd := exec.Command("ssh", host, `tmux ls -F "#{session_name}"`)
   out, err := cmd.Output()
   if err != nil {
-    return nil, err
+    return nil, fmt.Errorf("error listing sessions groups: %s. Maybe no session was created?", err)
   }
   lines := strings.Split(string(out),"\n")
   sessionsPerGroup := make(map[string]map[string]bool)
   for _,l := range lines {
-    split := strings.Split(l,",")
-    if len(split) != 3 { continue }
-    group, session, _ := split[0], split[1], split[2]
+    group, session, err := parseGroupSessFromString(l)
+    if err != nil {
+      continue
+    }
+    // Skip unrecognized format
     if _,ok := sessionsPerGroup[group]; !ok {
       sessionsPerGroup[group] = make(map[string]bool)
     }
@@ -63,16 +94,15 @@ func addWindow() error {
 	if err != nil {
 		return err
 	}
-	con := tree.Root.FindFocused(func(n *i3.Node) bool {
-    return len(n.Nodes) == 0 &&
-           len(n.FloatingNodes) == 0 &&
-           n.Type == i3.Con
-	})
-  group, session, err := parseGroupSessFromCon(con)
+  con, err := getFocusedCon(&tree)
   if err != nil {
     return err
   }
-  log.Println(group,session)
+  group, _, err := parseGroupSessFromCon(con)
+  if err != nil {
+    return err
+  }
+  log.Println("Adding session to group",group)
   return nil
 }
 
@@ -111,7 +141,7 @@ func getTreeOfGroupSess(u *i3.Node) map[string]interface{} {
     }
     m := make(map[string]interface{})
     m["type"] = i3.Con
-    m["swallows"] = []map[string]string{{"instance":fmt.Sprintf("%s_%s",group,session)}}
+    m["swallows"] = []map[string]string{{"instance":fmt.Sprintf("%s%s%s",group,GROUP_SESS_DELIM,session)}}
     return m
   } else {
     var nodes []map[string]interface{}
@@ -151,7 +181,7 @@ func detachSessionGroup() error {
   if err != nil {
     return err
   }
-  group, session, err := parseGroupSessFromCon(con)
+  group, _, err := parseGroupSessFromCon(con)
   if err != nil {
     return err
   }
@@ -164,7 +194,7 @@ func detachSessionGroup() error {
   if err != nil {
     return err
   }
-  err = ioutil.WriteFile(fmt.Sprintf("%s_%s.json",group,session),j,0644)
+  err = ioutil.WriteFile(group+".json",j,0644)
   if err != nil {
     return err
   }
@@ -172,8 +202,8 @@ func detachSessionGroup() error {
   return nil
 }
 
-func resumeSessionGroup() error {
-  sessionsPerGroup, err := fetchSessionsPerGroup("RPi")
+func resumeSessionGroup(host string) error {
+  sessionsPerGroup, err := fetchSessionsPerGroup(host)
   if err != nil {
     return err
   }
@@ -181,14 +211,24 @@ func resumeSessionGroup() error {
   if !ok {
     return fmt.Errorf("group not found")
   }
-  if *resumeLayoutPath != "" {
-    _, err := i3.RunCommand(fmt.Sprintf("append_layout %s",*resumeLayoutPath))
+
+  cwd, err := os.Getwd()
+  if err != nil {
+    return err
+  }
+  absResumeLayoutPath := path.Join(cwd,*resumeGroup+".json")
+  if _, err := os.Stat(absResumeLayoutPath); err == nil {
+    _, err = i3.RunCommand(fmt.Sprintf("append_layout %s",absResumeLayoutPath))
     if err != nil {
       log.Fatal(err)
     }
+  } else {
+    log.Println(err)
   }
+  // Try to load a layout for the target sessions group
+
   for s,_ := range sessions {
-      sshCmd := fmt.Sprintf("ssh -t RPi tmux attach -t %s",s)
+      sshCmd := fmt.Sprintf("ssh -t %s tmux attach -t %s", host, encodeGroupSess(*resumeGroup,s))
       i3cmd := fmt.Sprintf("exec %s %s '%s_%s' %s",terminalBin,terminalNameFlag,*resumeGroup,s,sshCmd)
       _, err := i3.RunCommand(i3cmd)
       if err != nil {
@@ -198,9 +238,9 @@ func resumeSessionGroup() error {
   return nil
 }
 
-func listSessionsGroup() error {
+func listSessionsGroup(host string) error {
   fmt.Println("Retrieving available sessions groups ...")
-  sessionsPerGroup, err := fetchSessionsPerGroup("RPi")
+  sessionsPerGroup, err := fetchSessionsPerGroup(host)
   if err != nil {
     return err
   }
@@ -218,12 +258,6 @@ func listSessionsGroup() error {
 }
 
 func main() {
-  logwriter, err := syslog.New(syslog.LOG_DEBUG, "i3tmux")
-  if err != nil {
-    log.Fatal(err)
-  }
-  log.SetOutput(logwriter)
-
   flag.Parse()
   modsCount := 0
   if *addMode { modsCount++ }
@@ -246,12 +280,12 @@ func main() {
     }
   }
   if *resumeGroup != "" {
-    if err := resumeSessionGroup(); err != nil {
+    if err := resumeSessionGroup(host); err != nil {
       log.Fatal(err)
     }
   }
   if *listMode {
-    if err := listSessionsGroup(); err != nil {
+    if err := listSessionsGroup(host); err != nil {
       log.Fatal(err)
     }
   }
