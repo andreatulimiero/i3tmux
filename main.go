@@ -45,8 +45,17 @@ func init() {
     log.Fatal(err)
   }
   workingDir := path.Join(user.HomeDir,".config","i3tmux")
-  if err = os.Chdir(workingDir); err != nil {
-    log.Fatal(err)
+  err = os.Chdir(workingDir)
+  if err != nil {
+    if os.IsNotExist(err) {
+      err = os.MkdirAll(workingDir, 0755)
+      if err != nil {
+        log.Fatal(err)
+      }
+      log.Println("Created "+workingDir+" directory")
+    } else {
+      log.Fatal(err)
+    }
   }
   // Chdir to ~/.config/i3tmux/
 }
