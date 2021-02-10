@@ -98,7 +98,24 @@ func fetchSessionsPerGroup(host string) (SessionsPerGroup, error) {
   return sessionsPerGroup, nil
 }
 
-func addWindow() error {
+func getNextSess(sessionsPerGroup SessionsPerGroup, group string) string {
+  sessions := sessionsPerGroup[group]
+  return fmt.Sprintf("%s_session%d",group,len(sessions))
+}
+
+func launchTermForSession(host string, group string, session string) error {
+  sshCmd := fmt.Sprintf("ssh -t %s tmux attach -t %s", host, encodeGroupSess(group,session))
+  i3cmd := fmt.Sprintf("exec %s %s '%s_%s' %s",
+                       terminalBin,
+                       terminalNameFlag,
+                       group,
+                       session,
+                       sshCmd)
+  _, err := i3.RunCommand(i3cmd)
+  return err
+}
+
+func addWindow(host string) error {
   tree, err := i3.GetTree()
 	if err != nil {
 		return err
@@ -111,7 +128,22 @@ func addWindow() error {
   if err != nil {
     return err
   }
-  log.Println("Adding session to group",group)
+  sessionsPerGroup, err := fetchSessionsPerGroup(host)
+  if err != nil {
+    return err
+  }
+  nextSess := getNextSess(sessionsPerGroup, group)
+  log.Println("Adding session to group",group,nextSess)
+  err = exec.Command("ssh",
+                     host,
+                     "tmux new -d -s "+encodeGroupSess(group,nextSess)).Run()
+  if err != nil {
+    return fmt.Errorf("error creating new session %s: %s", nextSess, err)
+  }
+  err = launchTermForSession(host, group, nextSess)
+  if err != nil {
+    return err
+  }
   return nil
 }
 
@@ -221,25 +253,28 @@ func resumeSessionGroup(host string) error {
     return fmt.Errorf("group not found")
   }
 
-  cwd, err := os.Getwd()
+  resumeLayoutPath := *resumeGroup+".json"
+  _, err = os.Stat(resumeLayoutPath)
   if err != nil {
-    return err
-  }
-  absResumeLayoutPath := path.Join(cwd,*resumeGroup+".json")
-  if _, err := os.Stat(absResumeLayoutPath); err == nil {
+    if !os.IsNotExist(err) {
+      log.Fatal(err)
+    }
+    // If error is not expected exit
+  } else {
+    cwd, err := os.Getwd()
+    if err != nil {
+      return err
+    }
+    absResumeLayoutPath := path.Join(cwd,resumeLayoutPath)
     _, err = i3.RunCommand(fmt.Sprintf("append_layout %s",absResumeLayoutPath))
     if err != nil {
       log.Fatal(err)
     }
-  } else {
-    log.Println(err)
   }
   // Try to load a layout for the target sessions group
 
   for s,_ := range sessions {
-      sshCmd := fmt.Sprintf("ssh -t %s tmux attach -t %s", host, encodeGroupSess(*resumeGroup,s))
-      i3cmd := fmt.Sprintf("exec %s %s '%s_%s' %s",terminalBin,terminalNameFlag,*resumeGroup,s,sshCmd)
-      _, err := i3.RunCommand(i3cmd)
+      err := launchTermForSession(host,*resumeGroup,s)
       if err != nil {
         log.Fatal(err)
       }
@@ -279,7 +314,7 @@ func main() {
   }
 
   if *addMode {
-    if err := addWindow(); err != nil {
+    if err := addWindow(host); err != nil {
       log.Fatal(err)
     }
   }
