@@ -11,10 +11,10 @@ import (
 	"os/exec"
 	"os/user"
 	"path"
-  "regexp"
-  "sort"
+	"regexp"
+	"sort"
+	"strconv"
 	"strings"
-  "strconv"
 
 	"go.i3wm.org/i3/v4"
 )
@@ -48,7 +48,7 @@ func init() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	workingDir := path.Join(user.HomeDir, ".config", "i3tmux")
+	workingDir := path.Join(user.HomeDir, ".local", "share", "i3tmux")
 	err = os.Chdir(workingDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -103,25 +103,26 @@ func fetchSessionsPerGroup(host string) (SessionsPerGroup, error) {
 }
 
 var sessionFmtRe = regexp.MustCompile(`^[a-zA-Z]*(\d+)$`)
+
 func getNextSessIdx(sessionsPerGroup SessionsPerGroup, group string) int {
 	sessions := sessionsPerGroup[group]
-  var idxs []int
-  for s,_ := range sessions {
-    res := sessionFmtRe.FindStringSubmatch(s)
-    // TODO: Should handle if session name is malformed?
-    i, err := strconv.Atoi(res[1])
-    if err != nil {
-      log.Fatal(err)
-      // FIXME: Return the error
-    }
-    idxs = append(idxs, i)
-  }
-  sort.Ints(idxs)
-  for i, idx := range idxs {
-    if i < idx {
-      return i
-    }
-  }
+	var idxs []int
+	for s, _ := range sessions {
+		res := sessionFmtRe.FindStringSubmatch(s)
+		// TODO: Should handle if session name is malformed?
+		i, err := strconv.Atoi(res[1])
+		if err != nil {
+			log.Fatal(err)
+			// FIXME: Return the error
+		}
+		idxs = append(idxs, i)
+	}
+	sort.Ints(idxs)
+	for i, idx := range idxs {
+		if i < idx {
+			return i
+		}
+	}
 	return len(sessions)
 }
 
@@ -138,7 +139,7 @@ func launchTermForSession(host string, group string, session string) error {
 }
 
 func addWindow(host string) error {
-  // TODO: Add swallow container first to inform user operation is being performed?
+	// TODO: Add swallow container first to inform user operation is being performed?
 	tree, err := i3.GetTree()
 	if err != nil {
 		return err
@@ -156,7 +157,7 @@ func addWindow(host string) error {
 		return err
 	}
 	nextSessIdx := getNextSessIdx(sessionsPerGroup, group)
-  nextSess := fmt.Sprintf("session%d",nextSessIdx)
+	nextSess := fmt.Sprintf("session%d", nextSessIdx)
 	log.Println("Adding session to group", group, nextSess)
 	err = exec.Command("ssh",
 		host,
@@ -342,7 +343,7 @@ func startServer(host string) error {
 			if err != nil {
 				return fmt.Errorf("error killing session %s: %s", encodeGroupSess(group, session), err)
 			}
-      log.Println("Closed session",encodeGroupSess(group, session))
+			log.Println("Closed session", encodeGroupSess(group, session))
 		}
 	}
 	return recv.Close()
@@ -393,6 +394,7 @@ func main() {
 	}
 	if *listMode {
 		if err := listSessionsGroup(*host); err != nil {
+			fmt.Println(err)
 			log.Fatal(err)
 		}
 	}
