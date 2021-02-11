@@ -21,12 +21,13 @@ import (
 
 const (
 	GROUP_SESS_DELIM = "_"
+	HOST_DELIM = "@"
 )
 
 var (
 	terminalBin      = "kitty"
 	terminalNameFlag = "--name"
-	host             = flag.String("host", "", "remote host where tmux server runs")
+	hostFlag         = flag.String("host", "", "remote host where tmux server runs")
 	addMode          = flag.Bool("add", false, "add window to current session group")
 	detachMode       = flag.Bool("detach", false, "detach current session group")
 	resumeGroup      = flag.String("resume", "", "resume session group")
@@ -64,20 +65,46 @@ func init() {
 	// Chdir to ~/.config/i3tmux/
 }
 
-func encodeGroupSess(group string, session string) string {
+func serializeGroupSess(group string, session string) string {
 	return fmt.Sprintf("%s%s%s", group, GROUP_SESS_DELIM, session)
 }
 
-func parseGroupSessFromString(s string) (string, string, error) {
+func serializeHostGroupSess(host, group, session string) string {
+  return fmt.Sprintf("%s@%s",serializeGroupSess(group, session), host)
+}
+
+func deserializeHostGroupSessFromString(s string) (string, string, string, error) {
+  split := strings.Split(s, HOST_DELIM)
+	if len(split) != 2 {
+		return "", "", "", fmt.Errorf("name not in GROUP%sSESSION%sHOST format: %s",
+                                  GROUP_SESS_DELIM,
+                                  HOST_DELIM,
+                                  s)
+	}
+  host := split[1]
+  group, sess, err := deserializeGroupSessFromString(split[0])
+	if err != nil {
+    return "", "", "", err
+	}
+	return host, group, sess, nil
+}
+
+func deserializeGroupSessFromString(s string) (string, string, error) {
 	split := strings.Split(s, GROUP_SESS_DELIM)
 	if len(split) != 2 {
-		return "", "", fmt.Errorf("name in unexpected format: %s", s)
+		return "", "", fmt.Errorf("name not in GROUP%sSESSION format: %s",
+                                  GROUP_SESS_DELIM,
+                                  s)
 	}
 	return split[0], split[1], nil
 }
 
-func parseGroupSessFromCon(con *i3.Node) (string, string, error) {
-	return parseGroupSessFromString(con.WindowProperties.Instance)
+func deserializeHostGroupSessFromCon(con *i3.Node) (string, string, string, error) {
+	return deserializeHostGroupSessFromString(con.WindowProperties.Instance)
+}
+
+func deserializeGroupSessFromCon(con *i3.Node) (string, string, error) {
+	return deserializeGroupSessFromString(con.WindowProperties.Instance)
 }
 
 func fetchSessionsPerGroup(host string) (SessionsPerGroup, error) {
@@ -89,7 +116,7 @@ func fetchSessionsPerGroup(host string) (SessionsPerGroup, error) {
 	lines := strings.Split(string(out), "\n")
 	sessionsPerGroup := make(map[string]map[string]bool)
 	for _, l := range lines {
-		group, session, err := parseGroupSessFromString(l)
+		group, session, err := deserializeGroupSessFromString(l)
 		if err != nil {
 			continue
 		}
@@ -127,18 +154,17 @@ func getNextSessIdx(sessionsPerGroup SessionsPerGroup, group string) int {
 }
 
 func launchTermForSession(host string, group string, session string) error {
-	sshCmd := fmt.Sprintf("ssh -t %s tmux attach -t %s", host, encodeGroupSess(group, session))
-	i3cmd := fmt.Sprintf("exec %s %s '%s_%s' %s",
+	sshCmd := fmt.Sprintf("ssh -t %s tmux attach -t %s", host, serializeGroupSess(group, session))
+	i3cmd := fmt.Sprintf("exec %s %s '%s' %s",
 		terminalBin,
 		terminalNameFlag,
-		group,
-		session,
+    serializeHostGroupSess(host,group,session),
 		sshCmd)
 	_, err := i3.RunCommand(i3cmd)
 	return err
 }
 
-func addWindow(host string) error {
+func addWindow() error {
 	// TODO: Infer host from window
 	// TODO: Add swallow container first to inform user operation is being performed?
 	tree, err := i3.GetTree()
@@ -149,7 +175,7 @@ func addWindow(host string) error {
 	if err != nil {
 		return err
 	}
-	group, _, err := parseGroupSessFromCon(con)
+	host, group, _, err := deserializeHostGroupSessFromCon(con)
 	if err != nil {
 		return err
 	}
@@ -157,15 +183,18 @@ func addWindow(host string) error {
 	if err != nil {
 		return err
 	}
+
 	nextSessIdx := getNextSessIdx(sessionsPerGroup, group)
 	nextSess := fmt.Sprintf("session%d", nextSessIdx)
 	log.Println("Adding session to group", group, nextSess)
 	err = exec.Command("ssh",
 		host,
-		"tmux new -d -s "+encodeGroupSess(group, nextSess)).Run()
+		"tmux new -d -s "+serializeGroupSess(group, nextSess)).Run()
 	if err != nil {
 		return fmt.Errorf("error creating new session %s: %s", nextSess, err)
 	}
+  // Add new session remotely
+
 	err = launchTermForSession(host, group, nextSess)
 	if err != nil {
 		return err
@@ -200,15 +229,16 @@ func nodeIsLeaf(n *i3.Node) bool {
 }
 
 func getTreeOfGroupSess(u *i3.Node) map[string]interface{} {
+  // TODO: Handle workspaces containers too
 	if nodeIsLeaf(u) {
-		group, session, err := parseGroupSessFromCon(u)
+		host, group, session, err := deserializeHostGroupSessFromCon(u)
 		if err != nil {
 			// We care about tmux session leaves only
 			return nil
 		}
 		m := make(map[string]interface{})
 		m["type"] = i3.Con
-		m["swallows"] = []map[string]string{{"instance": fmt.Sprintf("%s%s%s", group, GROUP_SESS_DELIM, session)}}
+		m["swallows"] = []map[string]string{{"instance": serializeHostGroupSess(host, group, session)}}
 		return m
 	} else {
 		var nodes []map[string]interface{}
@@ -229,7 +259,7 @@ func getTreeOfGroupSess(u *i3.Node) map[string]interface{} {
 		default:
 			m := make(map[string]interface{})
 			m["layout"] = u.Layout
-			m["type"] = u.Type
+      m["type"] = i3.Con
 			m["percent"] = u.Percent
 			m["nodes"] = nodes
 			return m
@@ -248,7 +278,7 @@ func detachSessionGroup() error {
 	if err != nil {
 		return err
 	}
-	group, _, err := parseGroupSessFromCon(con)
+	host, group, _, err := deserializeHostGroupSessFromCon(con)
 	if err != nil {
 		return err
 	}
@@ -265,7 +295,7 @@ func detachSessionGroup() error {
 	if err != nil {
 		return err
 	}
-	log.Println("Saved layout for group:", group)
+  log.Printf("Saved layout for %s@%s", group, host)
 	return nil
 }
 
@@ -334,17 +364,17 @@ func startServer(host string) error {
 	for recv.Next() {
 		ev := recv.Event().(*i3.WindowEvent)
 		if ev.Change == "close" {
-			group, session, err := parseGroupSessFromCon(&ev.Container)
+			host, group, session, err := deserializeHostGroupSessFromCon(&ev.Container)
 			if err != nil {
 				continue
 				// Not a container of interest
 			}
-			cmd := exec.Command("ssh", host, "tmux kill-session -t "+encodeGroupSess(group, session))
+			cmd := exec.Command("ssh", host, "tmux kill-session -t "+serializeGroupSess(group, session))
 			_, err = cmd.Output()
 			if err != nil {
-				return fmt.Errorf("error killing session %s: %s", encodeGroupSess(group, session), err)
+				return fmt.Errorf("error killing session %s: %s", serializeGroupSess(group, session), err)
 			}
-			log.Println("Closed session", encodeGroupSess(group, session))
+			log.Println("Closed session", serializeGroupSess(group, session))
 		}
 	}
 	return recv.Close()
@@ -353,7 +383,7 @@ func startServer(host string) error {
 func main() {
 	flag.Parse()
 
-	if *host == "" {
+	if *hostFlag == "" {
 		log.Fatal(fmt.Errorf("You must specify the target host"))
 	}
 
@@ -379,7 +409,7 @@ func main() {
 	// Ensure only one mode is selected
 
 	if *addMode {
-		if err := addWindow(*host); err != nil {
+		if err := addWindow(); err != nil {
 			log.Fatal(err)
 		}
 	}
@@ -389,18 +419,18 @@ func main() {
 		}
 	}
 	if *resumeGroup != "" {
-		if err := resumeSessionGroup(*host); err != nil {
+		if err := resumeSessionGroup(*hostFlag); err != nil {
 			log.Fatal(err)
 		}
 	}
 	if *listMode {
-		if err := listSessionsGroup(*host); err != nil {
+		if err := listSessionsGroup(*hostFlag); err != nil {
 			fmt.Println(err)
 			log.Fatal(err)
 		}
 	}
 	if *serverMode {
-		if err := startServer(*host); err != nil {
+		if err := startServer(*hostFlag); err != nil {
 			log.Fatal(err)
 		}
 	}
