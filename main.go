@@ -23,7 +23,7 @@ const (
 var (
 	terminalBin      = "kitty"
 	terminalNameFlag = "--name"
-	host             = "RPi"
+	host             = flag.String("host", "", "remote host where tmux server runs")
 	addMode          = flag.Bool("add", false, "add window to current session group")
 	detachMode       = flag.Bool("detach", false, "detach current session group")
 	resumeGroup      = flag.String("resume", "", "resume session group")
@@ -34,7 +34,7 @@ var (
 type SessionsPerGroup map[string]map[string]bool
 
 func init() {
-	logwriter, err := syslog.New(syslog.LOG_DEBUG, "i3tmux")
+	logwriter, err := syslog.New(syslog.LOG_INFO, "i3tmux")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -325,6 +325,11 @@ func startServer(host string) error {
 
 func main() {
 	flag.Parse()
+
+	if *host == "" {
+		log.Fatal(fmt.Errorf("You must specify the target host"))
+	}
+
 	modsCount := 0
 	if *addMode {
 		modsCount++
@@ -342,12 +347,12 @@ func main() {
 		modsCount++
 	}
 	if modsCount != 1 {
-		log.Println("You must specify one mode among 'add', 'detach', 'resume' and 'server'")
-		os.Exit(1)
+		log.Fatal(fmt.Errorf("You must specify one mode among 'add', 'detach', 'resume' and 'server'"))
 	}
+	// Ensure only one mode is selected
 
 	if *addMode {
-		if err := addWindow(host); err != nil {
+		if err := addWindow(*host); err != nil {
 			log.Fatal(err)
 		}
 	}
@@ -357,17 +362,17 @@ func main() {
 		}
 	}
 	if *resumeGroup != "" {
-		if err := resumeSessionGroup(host); err != nil {
+		if err := resumeSessionGroup(*host); err != nil {
 			log.Fatal(err)
 		}
 	}
 	if *listMode {
-		if err := listSessionsGroup(host); err != nil {
+		if err := listSessionsGroup(*host); err != nil {
 			log.Fatal(err)
 		}
 	}
 	if *serverMode {
-		if err := startServer(host); err != nil {
+		if err := startServer(*host); err != nil {
 			log.Fatal(err)
 		}
 	}
