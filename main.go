@@ -139,6 +139,7 @@ func launchTermForSession(host string, group string, session string) error {
 }
 
 func addWindow(host string) error {
+	// TODO: Infer host from window
 	// TODO: Add swallow container first to inform user operation is being performed?
 	tree, err := i3.GetTree()
 	if err != nil {
