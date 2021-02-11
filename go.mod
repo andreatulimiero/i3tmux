@@ -1,4 +1,4 @@
-module example.com/i3tmux
+module github.com/andreatulimiero/i3tmux
 
 go 1.15
 
