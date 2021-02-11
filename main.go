@@ -11,7 +11,10 @@ import (
 	"os/exec"
 	"os/user"
 	"path"
+  "regexp"
+  "sort"
 	"strings"
+  "strconv"
 
 	"go.i3wm.org/i3/v4"
 )
@@ -99,9 +102,27 @@ func fetchSessionsPerGroup(host string) (SessionsPerGroup, error) {
 	return sessionsPerGroup, nil
 }
 
-func getNextSess(sessionsPerGroup SessionsPerGroup, group string) string {
+var sessionFmtRe = regexp.MustCompile(`^[a-zA-Z]*(\d+)$`)
+func getNextSessIdx(sessionsPerGroup SessionsPerGroup, group string) int {
 	sessions := sessionsPerGroup[group]
-	return fmt.Sprintf("%s_session%d", group, len(sessions))
+  var idxs []int
+  for s,_ := range sessions {
+    res := sessionFmtRe.FindStringSubmatch(s)
+    // TODO: Should handle if session name is malformed?
+    i, err := strconv.Atoi(res[1])
+    if err != nil {
+      log.Fatal(err)
+      // FIXME: Return the error
+    }
+    idxs = append(idxs, i)
+  }
+  sort.Ints(idxs)
+  for i, idx := range idxs {
+    if i < idx {
+      return i
+    }
+  }
+	return len(sessions)
 }
 
 func launchTermForSession(host string, group string, session string) error {
@@ -133,7 +154,8 @@ func addWindow(host string) error {
 	if err != nil {
 		return err
 	}
-	nextSess := getNextSess(sessionsPerGroup, group)
+	nextSessIdx := getNextSessIdx(sessionsPerGroup, group)
+  nextSess := fmt.Sprintf("session%d",nextSessIdx)
 	log.Println("Adding session to group", group, nextSess)
 	err = exec.Command("ssh",
 		host,
@@ -304,6 +326,7 @@ func listSessionsGroup(host string) error {
 
 func startServer(host string) error {
 	// TODO: Add shutdown receiver to spawn a new WindowEventType receiver
+	// TODO: Invalidate/update old layout when window is closed
 	recv := i3.Subscribe(i3.WindowEventType)
 	for recv.Next() {
 		ev := recv.Event().(*i3.WindowEvent)
@@ -318,6 +341,7 @@ func startServer(host string) error {
 			if err != nil {
 				return fmt.Errorf("error killing session %s: %s", encodeGroupSess(group, session), err)
 			}
+      log.Println("Closed session",encodeGroupSess(group, session))
 		}
 	}
 	return recv.Close()
