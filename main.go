@@ -267,6 +267,25 @@ func getTreeOfGroupSess(u *i3.Node) map[string]interface{} {
 	}
 }
 
+func closeGroupSessWindows(u *i3.Node, group *string) error {
+  for _, v := range u.Nodes {
+    err := closeGroupSessWindows(v, group)
+    if err != nil {
+      return err
+    }
+  }
+  _, g, _, err := deserializeHostGroupSessFromCon(u)
+  if err != nil || g != *group {
+    return nil
+    // Just skip container since not targeted
+  }
+  _, err = i3.RunCommand(fmt.Sprintf("[con_id=%d] kill", u.ID))
+  if err != nil {
+    return err
+  }
+  return nil
+}
+
 func detachSessionGroup() error {
 	// TODO: Add killing of terminals running ssh sessions once layout is retrieved
 	//       to simulate a proper detach
@@ -296,6 +315,10 @@ func detachSessionGroup() error {
 		return err
 	}
   log.Printf("Saved layout for %s@%s", group, host)
+  err = closeGroupSessWindows(ws, &group)
+  if err != nil {
+    log.Fatal(err)
+  }
 	return nil
 }
 
@@ -358,7 +381,6 @@ func listSessionsGroup(host string) error {
 }
 
 func startServer(host string) error {
-	// TODO: Add shutdown receiver to spawn a new WindowEventType receiver
 	// TODO: Invalidate/update old layout when window is closed
 	recv := i3.Subscribe(i3.WindowEventType)
 	for recv.Next() {
