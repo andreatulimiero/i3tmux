@@ -19,20 +19,26 @@ import (
 	"go.i3wm.org/i3/v4"
 )
 
+// FIXME: Avoid killing a session remotely as a side effect of
+//        closing a window when detaching
+
 const (
 	GROUP_SESS_DELIM = "_"
-	HOST_DELIM = "@"
+	HOST_DELIM       = "@"
 )
 
 var (
-	terminalBin      = "kitty"
-	terminalNameFlag = "--name"
-	hostFlag         = flag.String("host", "", "remote host where tmux server runs")
-	addMode          = flag.Bool("add", false, "add window to current session group")
-	detachMode       = flag.Bool("detach", false, "detach current session group")
-	resumeGroup      = flag.String("resume", "", "resume session group")
-	listMode         = flag.Bool("list", false, "list sessions groups")
-	serverMode       = flag.Bool("server", false, "react to closing session windows")
+	terminalBin      = "st"
+	terminalNameFlag = "-n"
+	// TODO: Move terminal related preferences to configuration
+	//       file or command line argument
+	hostFlag     = flag.String("host", "", "remote host where tmux server runs")
+	addMode      = flag.Bool("add", false, "add window to current session group")
+	detachMode   = flag.Bool("detach", false, "detach current session group")
+	resumeGroup  = flag.String("resume", "", "resume session group")
+	listMode     = flag.Bool("list", false, "list sessions groups")
+	serverMode   = flag.Bool("server", false, "react to closing session windows")
+	sessionFmtRe = regexp.MustCompile(`^[a-zA-Z]*(\d+)$`)
 )
 
 type SessionsPerGroup map[string]map[string]bool
@@ -70,21 +76,21 @@ func serializeGroupSess(group string, session string) string {
 }
 
 func serializeHostGroupSess(host, group, session string) string {
-  return fmt.Sprintf("%s@%s",serializeGroupSess(group, session), host)
+	return fmt.Sprintf("%s@%s", serializeGroupSess(group, session), host)
 }
 
 func deserializeHostGroupSessFromString(s string) (string, string, string, error) {
-  split := strings.Split(s, HOST_DELIM)
+	split := strings.Split(s, HOST_DELIM)
 	if len(split) != 2 {
 		return "", "", "", fmt.Errorf("name not in GROUP%sSESSION%sHOST format: %s",
-                                  GROUP_SESS_DELIM,
-                                  HOST_DELIM,
-                                  s)
+			GROUP_SESS_DELIM,
+			HOST_DELIM,
+			s)
 	}
-  host := split[1]
-  group, sess, err := deserializeGroupSessFromString(split[0])
+	host := split[1]
+	group, sess, err := deserializeGroupSessFromString(split[0])
 	if err != nil {
-    return "", "", "", err
+		return "", "", "", err
 	}
 	return host, group, sess, nil
 }
@@ -93,8 +99,8 @@ func deserializeGroupSessFromString(s string) (string, string, error) {
 	split := strings.Split(s, GROUP_SESS_DELIM)
 	if len(split) != 2 {
 		return "", "", fmt.Errorf("name not in GROUP%sSESSION format: %s",
-                                  GROUP_SESS_DELIM,
-                                  s)
+			GROUP_SESS_DELIM,
+			s)
 	}
 	return split[0], split[1], nil
 }
@@ -129,9 +135,7 @@ func fetchSessionsPerGroup(host string) (SessionsPerGroup, error) {
 	return sessionsPerGroup, nil
 }
 
-var sessionFmtRe = regexp.MustCompile(`^[a-zA-Z]*(\d+)$`)
-
-func getNextSessIdx(sessionsPerGroup SessionsPerGroup, group string) int {
+func getNextSessIdx(sessionsPerGroup SessionsPerGroup, group string) (int, error) {
 	sessions := sessionsPerGroup[group]
 	var idxs []int
 	for s, _ := range sessions {
@@ -139,18 +143,17 @@ func getNextSessIdx(sessionsPerGroup SessionsPerGroup, group string) int {
 		// TODO: Should handle if session name is malformed?
 		i, err := strconv.Atoi(res[1])
 		if err != nil {
-			log.Fatal(err)
-			// FIXME: Return the error
+			return -1, err
 		}
 		idxs = append(idxs, i)
 	}
 	sort.Ints(idxs)
 	for i, idx := range idxs {
 		if i < idx {
-			return i
+			return i, nil
 		}
 	}
-	return len(sessions)
+	return len(sessions), nil
 }
 
 func launchTermForSession(host string, group string, session string) error {
@@ -158,14 +161,13 @@ func launchTermForSession(host string, group string, session string) error {
 	i3cmd := fmt.Sprintf("exec %s %s '%s' %s",
 		terminalBin,
 		terminalNameFlag,
-    serializeHostGroupSess(host,group,session),
+		serializeHostGroupSess(host, group, session),
 		sshCmd)
 	_, err := i3.RunCommand(i3cmd)
 	return err
 }
 
 func addWindow() error {
-	// TODO: Infer host from window
 	// TODO: Add swallow container first to inform user operation is being performed?
 	tree, err := i3.GetTree()
 	if err != nil {
@@ -184,7 +186,10 @@ func addWindow() error {
 		return err
 	}
 
-	nextSessIdx := getNextSessIdx(sessionsPerGroup, group)
+	nextSessIdx, err := getNextSessIdx(sessionsPerGroup, group)
+	if err != nil {
+		return err
+	}
 	nextSess := fmt.Sprintf("session%d", nextSessIdx)
 	log.Println("Adding session to group", group, nextSess)
 	err = exec.Command("ssh",
@@ -193,7 +198,7 @@ func addWindow() error {
 	if err != nil {
 		return fmt.Errorf("error creating new session %s: %s", nextSess, err)
 	}
-  // Add new session remotely
+	// Add new session remotely
 
 	err = launchTermForSession(host, group, nextSess)
 	if err != nil {
@@ -229,7 +234,6 @@ func nodeIsLeaf(n *i3.Node) bool {
 }
 
 func getTreeOfGroupSess(u *i3.Node) map[string]interface{} {
-  // TODO: Handle workspaces containers too
 	if nodeIsLeaf(u) {
 		host, group, session, err := deserializeHostGroupSessFromCon(u)
 		if err != nil {
@@ -259,7 +263,7 @@ func getTreeOfGroupSess(u *i3.Node) map[string]interface{} {
 		default:
 			m := make(map[string]interface{})
 			m["layout"] = u.Layout
-      m["type"] = i3.Con
+			m["type"] = i3.Con
 			m["percent"] = u.Percent
 			m["nodes"] = nodes
 			return m
@@ -268,27 +272,25 @@ func getTreeOfGroupSess(u *i3.Node) map[string]interface{} {
 }
 
 func closeGroupSessWindows(u *i3.Node, group *string) error {
-  for _, v := range u.Nodes {
-    err := closeGroupSessWindows(v, group)
-    if err != nil {
-      return err
-    }
-  }
-  _, g, _, err := deserializeHostGroupSessFromCon(u)
-  if err != nil || g != *group {
-    return nil
-    // Just skip container since not targeted
-  }
-  _, err = i3.RunCommand(fmt.Sprintf("[con_id=%d] kill", u.ID))
-  if err != nil {
-    return err
-  }
-  return nil
+	for _, v := range u.Nodes {
+		err := closeGroupSessWindows(v, group)
+		if err != nil {
+			return err
+		}
+	}
+	_, g, _, err := deserializeHostGroupSessFromCon(u)
+	if err != nil || g != *group {
+		return nil
+		// Just skip container since not targeted
+	}
+	_, err = i3.RunCommand(fmt.Sprintf("[con_id=%d] kill", u.ID))
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func detachSessionGroup() error {
-	// TODO: Add killing of terminals running ssh sessions once layout is retrieved
-	//       to simulate a proper detach
 	tree, err := i3.GetTree()
 	if err != nil {
 		return err
@@ -314,11 +316,11 @@ func detachSessionGroup() error {
 	if err != nil {
 		return err
 	}
-  log.Printf("Saved layout for %s@%s", group, host)
-  err = closeGroupSessWindows(ws, &group)
-  if err != nil {
-    log.Fatal(err)
-  }
+	log.Printf("Saved layout for %s@%s", group, host)
+	err = closeGroupSessWindows(ws, &group)
+	if err != nil {
+		log.Fatal(err)
+	}
 	return nil
 }
 
@@ -380,7 +382,7 @@ func listSessionsGroup(host string) error {
 	return nil
 }
 
-func startServer(host string) error {
+func startServer() error {
 	// TODO: Invalidate/update old layout when window is closed
 	recv := i3.Subscribe(i3.WindowEventType)
 	for recv.Next() {
@@ -405,7 +407,7 @@ func startServer(host string) error {
 func main() {
 	flag.Parse()
 
-	if *hostFlag == "" {
+	if *hostFlag == "" && (*resumeGroup != "" || *listMode) {
 		log.Fatal(fmt.Errorf("You must specify the target host"))
 	}
 
@@ -452,7 +454,7 @@ func main() {
 		}
 	}
 	if *serverMode {
-		if err := startServer(*hostFlag); err != nil {
+		if err := startServer(); err != nil {
 			log.Fatal(err)
 		}
 	}
