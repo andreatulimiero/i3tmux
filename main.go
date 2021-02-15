@@ -28,10 +28,9 @@ const (
 )
 
 var (
-	terminalBin      = "st"
-	terminalNameFlag = "-n"
-	// TODO: Move terminal related preferences to configuration
-	//       file or command line argument
+	terminalBinFlag  = flag.String("terminal", "", "the binary path of the terminal to use")
+	terminalNameFlag = flag.String("nameFlag", "", "the flag used by the terminal of choice"+
+		"to define the window class ")
 	hostFlag     = flag.String("host", "", "remote host where tmux server runs")
 	addMode      = flag.Bool("add", false, "add window to current session group")
 	detachMode   = flag.Bool("detach", false, "detach current session group")
@@ -159,8 +158,8 @@ func getNextSessIdx(sessionsPerGroup SessionsPerGroup, group string) (int, error
 func launchTermForSession(host string, group string, session string) error {
 	sshCmd := fmt.Sprintf("ssh -t %s tmux attach -t %s", host, serializeGroupSess(group, session))
 	i3cmd := fmt.Sprintf("exec %s %s '%s' %s",
-		terminalBin,
-		terminalNameFlag,
+		*terminalBinFlag,
+		*terminalNameFlag,
 		serializeHostGroupSess(host, group, session),
 		sshCmd)
 	_, err := i3.RunCommand(i3cmd)
