@@ -30,7 +30,7 @@ const (
 var (
 	terminalBinFlag  = flag.String("terminal", "", "the binary path of the terminal to use")
 	terminalNameFlag = flag.String("nameFlag", "", "the flag used by the terminal of choice"+
-		"to define the window class ")
+		"to define the window instance name")
 	hostFlag     = flag.String("host", "", "remote host where tmux server runs")
 	addMode      = flag.Bool("add", false, "add window to current session group")
 	detachMode   = flag.Bool("detach", false, "detach current session group")
@@ -116,7 +116,7 @@ func fetchSessionsPerGroup(host string) (SessionsPerGroup, error) {
 	cmd := exec.Command("ssh", host, `tmux ls -F "#{session_name}"`)
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("error listing sessions groups: %s. Maybe no session was created?", err)
+		return nil, fmt.Errorf("error listing sessions groups: %s", err)
 	}
 	lines := strings.Split(string(out), "\n")
 	sessionsPerGroup := make(map[string]map[string]bool)
@@ -157,6 +157,7 @@ func getNextSessIdx(sessionsPerGroup SessionsPerGroup, group string) (int, error
 
 func launchTermForSession(host string, group string, session string) error {
 	sshCmd := fmt.Sprintf("ssh -t %s tmux attach -t %s", host, serializeGroupSess(group, session))
+  log.Println(sshCmd)
 	i3cmd := fmt.Sprintf("exec %s %s '%s' %s",
 		*terminalBinFlag,
 		*terminalNameFlag,
@@ -442,6 +443,9 @@ func main() {
 		}
 	}
 	if *resumeGroup != "" {
+    if *terminalBinFlag == "" || *terminalNameFlag == "" {
+      log.Fatal(fmt.Errorf("You must specify the 'terminal' and 'nameFlag'"))
+    }
 		if err := resumeSessionGroup(*hostFlag); err != nil {
 			log.Fatal(err)
 		}
