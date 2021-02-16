@@ -330,7 +330,7 @@ func resumeSessionGroup(host string) error {
 	}
 	sessions, ok := sessionsPerGroup[*resumeGroup]
 	if !ok {
-		return fmt.Errorf("group not found")
+		return fmt.Errorf("%s group not found", *resumeGroup)
 	}
 
 	resumeLayoutPath := *resumeGroup + ".json"
