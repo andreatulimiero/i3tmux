@@ -259,6 +259,9 @@ func getTreeOfGroupSess(u *i3.Node) map[string]interface{} {
 			return nil
 		case 1:
 			// Optimize out self and return the only child
+      // TODO: Make this an option. If optimization is not done it should
+      //       be easier to recreate an entire workspace layout with other
+      //       applications (e.g., browser)
 			return nodes[0]
 		default:
 			m := make(map[string]interface{})
