@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -29,12 +30,16 @@ var (
 	terminalNameFlag = flag.String("nameFlag", "", "the flag used by the terminal of choice"+
 		"to define the window instance name")
 	hostFlag     = flag.String("host", "", "remote host where tmux server runs")
+	newGroup     = flag.String("new", "", "create new session group")
 	addMode      = flag.Bool("add", false, "add window to current session group")
 	detachMode   = flag.Bool("detach", false, "detach current session group")
 	resumeGroup  = flag.String("resume", "", "resume session group")
 	listMode     = flag.Bool("list", false, "list sessions groups")
 	serverMode   = flag.Bool("server", false, "react to closing session windows")
-	sessionFmtRe = regexp.MustCompile(`^[a-zA-Z]*(\d+)$`)
+	sessionFmtRe = regexp.MustCompile(`^[a-zA-Z]+_[a-zA-Z]+(\d+)$`)
+
+	TmuxNoSessionsError = errors.New("tmux no sessions")
+	UnknownRemoteError  = errors.New("unknown remote error")
 )
 
 type SessionsPerGroup map[string]map[string]bool
@@ -116,11 +121,10 @@ func fetchSessionsPerGroup(host string) (SessionsPerGroup, error) {
 	// stderr messages do not pollute stdout
 	outStr := string(out)
 	if err != nil {
-		errMsg := fmt.Sprintf("error listing sessions groups: %s", err)
-		if strings.HasSuffix(outStr, "(No such file or directory)\n") {
-			errMsg += "\nHint: maybe you have no sessions yet?"
+		if strings.HasPrefix(outStr, "no server running on ") {
+			return nil, TmuxNoSessionsError
 		}
-		return nil, fmt.Errorf(errMsg)
+		return nil, err
 	}
 	lines := strings.Split(outStr, "\n")
 	sessionsPerGroup := make(map[string]map[string]bool)
@@ -200,7 +204,7 @@ func addWindow() error {
 		host,
 		"tmux new -d -s "+serializeGroupSess(group, nextSess)).Run()
 	if err != nil {
-		return fmt.Errorf("error creating new session %s: %s", nextSess, err)
+		return UnknownRemoteError
 	}
 	// Add new session remotely
 
@@ -411,14 +415,48 @@ func startServer() error {
 	return recv.Close()
 }
 
+func createSessionGroup(groupName, host string) error {
+	if strings.Contains(groupName, GROUP_SESS_DELIM) {
+		return fmt.Errorf("group name cannot contain '%s'", GROUP_SESS_DELIM)
+	}
+	sessionsPerGroup, err := fetchSessionsPerGroup(host)
+	if err != nil && !errors.Is(err, TmuxNoSessionsError) {
+		return fmt.Errorf("error fetching sessions: %s", err)
+	}
+	if _, ok := sessionsPerGroup[groupName]; ok {
+		return fmt.Errorf("already exists")
+	}
+	groupSessName := fmt.Sprintf("%s%s%s", groupName, GROUP_SESS_DELIM, "session0")
+	cmd := exec.Command("ssh", host, fmt.Sprintf("tmux new -d -s %s", groupSessName))
+	out, err := cmd.CombinedOutput()
+	// For simplicity's sake we assume that if the command succeds
+	// stderr messages do not pollute stdout
+	if err != nil {
+		return fmt.Errorf("%s, %w", string(out), err)
+	}
+
+	sessionsPerGroup, err = fetchSessionsPerGroup(host)
+	if err != nil {
+		return fmt.Errorf("error fetching sessions to check success: %w", err)
+	}
+	if _, ok := sessionsPerGroup[groupName]; !ok {
+		return fmt.Errorf("creation check failed")
+	}
+	log.Printf("Correctly created session group %s\n", groupName)
+	return nil
+}
+
 func main() {
 	flag.Parse()
 
-	if *hostFlag == "" && (*resumeGroup != "" || *listMode) {
+	if *hostFlag == "" && (*newGroup != "" || *resumeGroup != "" || *listMode) {
 		log.Fatal(fmt.Errorf("You must specify the target host"))
 	}
 
 	modsCount := 0
+	if *newGroup != "" {
+		modsCount++
+	}
 	if *addMode {
 		modsCount++
 	}
@@ -435,18 +473,23 @@ func main() {
 		modsCount++
 	}
 	if modsCount != 1 {
-		log.Fatal(fmt.Errorf("You must specify one mode among 'add', 'detach', 'resume' and 'server'"))
+		log.Fatal(fmt.Errorf("You must specify one mode among 'new', 'add', 'detach', 'resume' and 'server'"))
 	}
 	// Ensure only one mode is selected
 
+	if *newGroup != "" {
+		if err := createSessionGroup(*newGroup, *hostFlag); err != nil {
+			log.Fatal(fmt.Errorf("Error creating new sessions group: %w", err))
+		}
+	}
 	if *addMode {
 		if err := addWindow(); err != nil {
-			log.Fatal(err)
+			log.Fatal(fmt.Errorf("Error adding window: %w", err))
 		}
 	}
 	if *detachMode {
 		if err := detachSessionGroup(); err != nil {
-			log.Fatal(err)
+			log.Fatal(fmt.Errorf("Error detaching group: %w", err))
 		}
 	}
 	if *resumeGroup != "" {
@@ -454,12 +497,17 @@ func main() {
 			log.Fatal(fmt.Errorf("You must specify the 'terminal' and 'nameFlag'"))
 		}
 		if err := resumeSessionGroup(*hostFlag); err != nil {
-			log.Fatal(err)
+			log.Fatal(fmt.Errorf("Error resuming group: %w", err))
 		}
 	}
 	if *listMode {
-		if err := listSessionsGroup(*hostFlag); err != nil {
-			fmt.Println(err)
+		err := listSessionsGroup(*hostFlag)
+		if err != nil {
+			errMsg := fmt.Sprintf("Error listing group: %s", err)
+			if errors.Is(err, TmuxNoSessionsError) {
+				errMsg += "\nHint: maybe you have no sessions yet?"
+			}
+			log.Fatal(fmt.Errorf(errMsg))
 		}
 	}
 	if *serverMode {
