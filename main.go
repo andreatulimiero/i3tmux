@@ -19,9 +19,6 @@ import (
 	"go.i3wm.org/i3/v4"
 )
 
-// FIXME: Avoid killing a session remotely as a side effect of
-//        closing a window when detaching
-
 const (
 	GROUP_SESS_DELIM = "_"
 	HOST_DELIM       = "@"
@@ -114,18 +111,25 @@ func deserializeGroupSessFromCon(con *i3.Node) (string, string, error) {
 
 func fetchSessionsPerGroup(host string) (SessionsPerGroup, error) {
 	cmd := exec.Command("ssh", host, `tmux ls -F "#{session_name}"`)
-	out, err := cmd.Output()
+	out, err := cmd.CombinedOutput()
+	// For simplicity's sake we assume that if the command succeds
+	// stderr messages do not pollute stdout
+	outStr := string(out)
 	if err != nil {
-		return nil, fmt.Errorf("error listing sessions groups: %s", err)
+		errMsg := fmt.Sprintf("error listing sessions groups: %s", err)
+		if strings.HasSuffix(outStr, "(No such file or directory)\n") {
+			errMsg += "\nHint: maybe you have no sessions yet?"
+		}
+		return nil, fmt.Errorf(errMsg)
 	}
-	lines := strings.Split(string(out), "\n")
+	lines := strings.Split(outStr, "\n")
 	sessionsPerGroup := make(map[string]map[string]bool)
 	for _, l := range lines {
 		group, session, err := deserializeGroupSessFromString(l)
 		if err != nil {
+			// Skip unrecognized format
 			continue
 		}
-		// Skip unrecognized format
 		if _, ok := sessionsPerGroup[group]; !ok {
 			sessionsPerGroup[group] = make(map[string]bool)
 		}
@@ -157,7 +161,7 @@ func getNextSessIdx(sessionsPerGroup SessionsPerGroup, group string) (int, error
 
 func launchTermForSession(host string, group string, session string) error {
 	sshCmd := fmt.Sprintf("ssh -t %s tmux attach -t %s", host, serializeGroupSess(group, session))
-  log.Println(sshCmd)
+	log.Println(sshCmd)
 	i3cmd := fmt.Sprintf("exec %s %s '%s' %s",
 		*terminalBinFlag,
 		*terminalNameFlag,
@@ -259,9 +263,9 @@ func getTreeOfGroupSess(u *i3.Node) map[string]interface{} {
 			return nil
 		case 1:
 			// Optimize out self and return the only child
-      // TODO: Make this an option. If optimization is not done it should
-      //       be easier to recreate an entire workspace layout with other
-      //       applications (e.g., browser)
+			// TODO: Make this an option. If optimization is not done it should
+			//       be easier to recreate an entire workspace layout with other
+			//       applications (e.g., browser)
 			return nodes[0]
 		default:
 			m := make(map[string]interface{})
@@ -446,9 +450,9 @@ func main() {
 		}
 	}
 	if *resumeGroup != "" {
-    if *terminalBinFlag == "" || *terminalNameFlag == "" {
-      log.Fatal(fmt.Errorf("You must specify the 'terminal' and 'nameFlag'"))
-    }
+		if *terminalBinFlag == "" || *terminalNameFlag == "" {
+			log.Fatal(fmt.Errorf("You must specify the 'terminal' and 'nameFlag'"))
+		}
 		if err := resumeSessionGroup(*hostFlag); err != nil {
 			log.Fatal(err)
 		}
@@ -456,7 +460,6 @@ func main() {
 	if *listMode {
 		if err := listSessionsGroup(*hostFlag); err != nil {
 			fmt.Println(err)
-			log.Fatal(err)
 		}
 	}
 	if *serverMode {
