@@ -30,13 +30,14 @@ var (
 	terminalNameFlag = flag.String("nameFlag", "", "the flag used by the terminal of choice"+
 		"to define the window instance name")
 	hostFlag     = flag.String("host", "", "remote host where tmux server runs")
-	newGroup     = flag.String("new", "", "create new session group")
+	newMode      = flag.String("new", "", "create new session group")
 	addMode      = flag.Bool("add", false, "add window to current session group")
 	detachMode   = flag.Bool("detach", false, "detach current session group")
-	resumeGroup  = flag.String("resume", "", "resume session group")
+	resumeMode   = flag.String("resume", "", "resume session group")
 	listMode     = flag.Bool("list", false, "list sessions groups")
 	serverMode   = flag.Bool("server", false, "react to closing session windows")
-	sessionFmtRe = regexp.MustCompile(`^[a-zA-Z]+_[a-zA-Z]+(\d+)$`)
+	killMode     = flag.Bool("kill", false, "kill current session locally and remotely")
+	sessionFmtRe = regexp.MustCompile(`^[a-zA-Z]*(\d+)$`)
 
 	TmuxNoSessionsError = errors.New("tmux no sessions")
 	UnknownRemoteError  = errors.New("unknown remote error")
@@ -117,7 +118,7 @@ func deserializeGroupSessFromCon(con *i3.Node) (string, string, error) {
 func fetchSessionsPerGroup(host string) (SessionsPerGroup, error) {
 	cmd := exec.Command("ssh", host, `tmux ls -F "#{session_name}"`)
 	out, err := cmd.CombinedOutput()
-	// For simplicity's sake we assume that if the command succeds
+	// For simplicity's sake we assume that if the command succeeds
 	// stderr messages do not pollute stdout
 	outStr := string(out)
 	if err != nil {
@@ -147,7 +148,9 @@ func getNextSessIdx(sessionsPerGroup SessionsPerGroup, group string) (int, error
 	var idxs []int
 	for s, _ := range sessions {
 		res := sessionFmtRe.FindStringSubmatch(s)
-		// TODO: Should handle if session name is malformed?
+		if len(res) != 2 {
+			return -1, fmt.Errorf("malformed session '%s'", s)
+		}
 		i, err := strconv.Atoi(res[1])
 		if err != nil {
 			return -1, err
@@ -163,19 +166,19 @@ func getNextSessIdx(sessionsPerGroup SessionsPerGroup, group string) (int, error
 	return len(sessions), nil
 }
 
-func launchTermForSession(host string, group string, session string) error {
+func launchTermForSession(host, group, session, terminalBin, nameFlag string) error {
 	sshCmd := fmt.Sprintf("ssh -t %s tmux attach -t %s", host, serializeGroupSess(group, session))
 	log.Println(sshCmd)
 	i3cmd := fmt.Sprintf("exec %s %s '%s' %s",
-		*terminalBinFlag,
-		*terminalNameFlag,
+		terminalBin,
+		nameFlag,
 		serializeHostGroupSess(host, group, session),
 		sshCmd)
 	_, err := i3.RunCommand(i3cmd)
 	return err
 }
 
-func addWindow() error {
+func addWindow(terminalBin, nameFlag string) error {
 	// TODO: Add swallow container first to inform user operation is being performed?
 	tree, err := i3.GetTree()
 	if err != nil {
@@ -208,7 +211,7 @@ func addWindow() error {
 	}
 	// Add new session remotely
 
-	err = launchTermForSession(host, group, nextSess)
+	err = launchTermForSession(host, group, nextSess, terminalBin, nameFlag)
 	if err != nil {
 		return err
 	}
@@ -335,17 +338,17 @@ func detachSessionGroup() error {
 	return nil
 }
 
-func resumeSessionGroup(host string) error {
+func resumeSessionGroup(host, terminalBin, nameFlag string) error {
 	sessionsPerGroup, err := fetchSessionsPerGroup(host)
 	if err != nil {
 		return err
 	}
-	sessions, ok := sessionsPerGroup[*resumeGroup]
+	sessions, ok := sessionsPerGroup[*resumeMode]
 	if !ok {
-		return fmt.Errorf("%s group not found", *resumeGroup)
+		return fmt.Errorf("group '%s' not found", *resumeMode)
 	}
 
-	resumeLayoutPath := *resumeGroup + ".json"
+	resumeLayoutPath := *resumeMode + ".json"
 	_, err = os.Stat(resumeLayoutPath)
 	if err != nil {
 		if !os.IsNotExist(err) {
@@ -366,7 +369,7 @@ func resumeSessionGroup(host string) error {
 	// Try to load a layout for the target sessions group
 
 	for s, _ := range sessions {
-		err := launchTermForSession(host, *resumeGroup, s)
+		err := launchTermForSession(host, *resumeMode, s, terminalBin, nameFlag)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -429,32 +432,45 @@ func createSessionGroup(groupName, host string) error {
 	groupSessName := fmt.Sprintf("%s%s%s", groupName, GROUP_SESS_DELIM, "session0")
 	cmd := exec.Command("ssh", host, fmt.Sprintf("tmux new -d -s %s", groupSessName))
 	out, err := cmd.CombinedOutput()
-	// For simplicity's sake we assume that if the command succeds
+	// For simplicity's sake we assume that if the command succeeds
 	// stderr messages do not pollute stdout
 	if err != nil {
 		return fmt.Errorf("%s, %w", string(out), err)
 	}
+	return nil
+}
 
-	sessionsPerGroup, err = fetchSessionsPerGroup(host)
+func killSession() error {
+	tree, err := i3.GetTree()
 	if err != nil {
-		return fmt.Errorf("error fetching sessions to check success: %w", err)
+		return err
 	}
-	if _, ok := sessionsPerGroup[groupName]; !ok {
-		return fmt.Errorf("creation check failed")
+	con, err := getFocusedCon(&tree)
+	if err != nil {
+		return err
 	}
-	log.Printf("Correctly created session group %s\n", groupName)
+	host, group, session, err := deserializeHostGroupSessFromCon(con)
+	if err != nil {
+		return err
+	}
+	cmd := exec.Command("ssh", host, "tmux kill-session -t "+serializeGroupSess(group, session))
+	_, err = cmd.Output()
+	if err != nil {
+		return fmt.Errorf("error killing session %s: %s", serializeGroupSess(group, session), err)
+	}
+	log.Println("Closed session", serializeGroupSess(group, session))
 	return nil
 }
 
 func main() {
 	flag.Parse()
 
-	if *hostFlag == "" && (*newGroup != "" || *resumeGroup != "" || *listMode) {
+	if *hostFlag == "" && (*newMode != "" || *resumeMode != "" || *listMode) {
 		log.Fatal(fmt.Errorf("You must specify the target host"))
 	}
 
 	modsCount := 0
-	if *newGroup != "" {
+	if *newMode != "" {
 		modsCount++
 	}
 	if *addMode {
@@ -463,7 +479,7 @@ func main() {
 	if *detachMode {
 		modsCount++
 	}
-	if *resumeGroup != "" {
+	if *resumeMode != "" {
 		modsCount++
 	}
 	if *listMode {
@@ -472,18 +488,21 @@ func main() {
 	if *serverMode {
 		modsCount++
 	}
+	if *killMode {
+		modsCount++
+	}
 	if modsCount != 1 {
-		log.Fatal(fmt.Errorf("You must specify one mode among 'new', 'add', 'detach', 'resume' and 'server'"))
+		log.Fatal(fmt.Errorf("You must specify one mode among 'new', 'add', 'detach', 'resume', 'server' and 'kill'"))
 	}
 	// Ensure only one mode is selected
 
-	if *newGroup != "" {
-		if err := createSessionGroup(*newGroup, *hostFlag); err != nil {
+	if *newMode != "" {
+		if err := createSessionGroup(*newMode, *hostFlag); err != nil {
 			log.Fatal(fmt.Errorf("Error creating new sessions group: %w", err))
 		}
 	}
 	if *addMode {
-		if err := addWindow(); err != nil {
+		if err := addWindow(*terminalBinFlag, *terminalNameFlag); err != nil {
 			log.Fatal(fmt.Errorf("Error adding window: %w", err))
 		}
 	}
@@ -492,11 +511,11 @@ func main() {
 			log.Fatal(fmt.Errorf("Error detaching group: %w", err))
 		}
 	}
-	if *resumeGroup != "" {
+	if *resumeMode != "" {
 		if *terminalBinFlag == "" || *terminalNameFlag == "" {
 			log.Fatal(fmt.Errorf("You must specify the 'terminal' and 'nameFlag'"))
 		}
-		if err := resumeSessionGroup(*hostFlag); err != nil {
+		if err := resumeSessionGroup(*hostFlag, *terminalBinFlag, *terminalNameFlag); err != nil {
 			log.Fatal(fmt.Errorf("Error resuming group: %w", err))
 		}
 	}
@@ -513,6 +532,11 @@ func main() {
 	if *serverMode {
 		if err := startServer(); err != nil {
 			log.Fatal(err)
+		}
+	}
+	if *killMode {
+		if err := killSession(); err != nil {
+			log.Fatal(fmt.Errorf("Error killing session: %w", err))
 		}
 	}
 }
