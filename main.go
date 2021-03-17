@@ -138,17 +138,13 @@ func listSessionsGroup(host string) error {
 	if err != nil {
 		return err
 	}
-	if len(sessionsPerGroup) == 0 {
-		fmt.Println("No available session")
-	} else {
-		for g, sessions := range sessionsPerGroup {
-			fmt.Println(g + ":")
-			for s, _ := range sessions {
-				fmt.Printf("- %s\n", s)
-			}
-		}
-	}
-	return nil
+  for g, sessions := range sessionsPerGroup {
+    fmt.Println(g + ":")
+    for s, _ := range sessions {
+      fmt.Printf("- %s\n", s)
+    }
+  }
+  return nil
 }
 
 func detachSessionGroup() error {
@@ -238,9 +234,9 @@ func killSession() error {
 		return err
 	}
 	cmd := exec.Command("ssh", host, "tmux kill-session -t "+serializeGroupSess(group, session))
-	_, err = cmd.Output()
+  out, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("error killing session %s: %s", serializeGroupSess(group, session), err)
+		return fmt.Errorf("error killing session %s: %s %w", serializeGroupSess(group, session), string(out), err)
 	}
 	log.Println("Closed session", serializeGroupSess(group, session))
 	return nil

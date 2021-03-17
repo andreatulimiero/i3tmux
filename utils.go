@@ -60,10 +60,11 @@ func fetchSessionsPerGroup(host string) (SessionsPerGroup, error) {
 	// stderr messages do not pollute stdout
 	outStr := string(out)
 	if err != nil {
-		if strings.HasPrefix(outStr, "no server running on ") {
+		if strings.Contains(outStr, "no server running on ") ||
+       strings.Contains(outStr, "No such file or directory") {
 			return nil, TmuxNoSessionsError
 		}
-		return nil, err
+    return nil, fmt.Errorf("%s: %w", outStr, err)
 	}
 	lines := strings.Split(outStr, "\n")
 	sessionsPerGroup := make(map[string]map[string]bool)
