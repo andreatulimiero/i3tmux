@@ -1,6 +1,7 @@
 package main
 
 import (
+  "sync/atomic"
   "errors"
 	"fmt"
 	"os"
@@ -10,62 +11,170 @@ import (
 	"testing"
 )
 
+const (
+  IMAGE_TAG = "i3tmux"
+)
+
+var (
+  globContName uint32 = 0
+  globPortNo uint32 = 2222
+  baseConf = Conf{
+    user: "root",
+    privKeyPath: "/home/heimdall/Repos/i3tmux/test_key",
+  }
+)
+
 func init() {
 	_, filename, _, _ := runtime.Caller(0)
 	err := os.Chdir(path.Dir(filename))
 	if err != nil {
 		panic(err)
 	}
-}
-
-func TestNoGroups(t *testing.T) {
-	sessionsPerGroup, err := fetchSessionsPerGroup("i3tmux")
-	if !errors.Is(err, TmuxNoSessionsError) {
-		t.Error(err)
-	}
-  if len(sessionsPerGroup) != 0 {
-    t.Error("No groups should be returned")
+  err = runSteps([]*exec.Cmd{
+    exec.Command("chmod", "0600", "test_key","test_key.pub"),
+		exec.Command("podman", "build", "-t",IMAGE_TAG, "-f", "Test.Dockerfile", "."),
+  })
+  if err != nil {
+    panic(fmt.Errorf("error initializing environment: %w", err))
   }
 }
 
-type Step struct {
-  cmd   *exec.Cmd
-  check bool
-}
-
-func runSteps(steps []Step) error {
-	for _, s := range steps {
-		out, err := s.cmd.CombinedOutput()
-		if s.check && err != nil {
-			return fmt.Errorf("%s: %s, %w", s.cmd, out, err)
+func runSteps(steps []*exec.Cmd) error {
+	for _, cmd := range steps {
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("%s: %s, %w", cmd, out, err)
 		}
 	}
 	return nil
 }
 
-func startSSHServer() error {
-	return runSteps([]Step{
-		{cmd: exec.Command("podman", "build", "-t", "i3tmux", "-f", "Test.Dockerfile", "."), check: true},
-		{cmd: exec.Command("podman", "stop", "i3tmux"), check: false},
-		{cmd: exec.Command("podman", "run", "--rm", "-d", "-p", "2222:22", "--name", "i3tmux", "i3tmux"), check: true},
-	})
+type SSHServer struct {
+  containerName string
 }
 
-func stopSSHServer() error {
-	return runSteps([]Step{
-		{cmd: exec.Command("podman", "stop", "i3tmux"), check: false},
+func newSSHServer() (*SSHServer,uint32) {
+  containerName := fmt.Sprintf("%s%d", IMAGE_TAG,atomic.AddUint32(&globContName,1))
+  portNo := atomic.AddUint32(&globPortNo,1)
+  portMapping := fmt.Sprintf("%d:22",portNo)
+  err := runSteps([]*exec.Cmd{
+		exec.Command("podman", "run", "--rm", "-d", "-p", portMapping, "--name", containerName, IMAGE_TAG),
 	})
-}
-
-func TestMain(m *testing.M) {
-	err := startSSHServer()
 	if err != nil {
 		panic(fmt.Errorf("error starting ssh server: %w", err))
 	}
-  errno := m.Run()
-	err = stopSSHServer()
+  return &SSHServer{containerName: containerName}, portNo
+}
+
+func (s *SSHServer) stop() {
+  err := runSteps([]*exec.Cmd{
+    exec.Command("podman", "stop", s.containerName),
+	})
 	if err != nil {
 		panic(fmt.Errorf("error stopping ssh server: %w", err))
 	}
-  os.Exit(errno)
+}
+
+func TestNoGroups(t *testing.T) {
+  sshServer, portNo := newSSHServer()
+  defer sshServer.stop()
+  conf := baseConf
+  conf.portNo = int(portNo)
+
+	sessionsPerGroup, err := fetchSessionsPerGroup("localhost", &conf)
+	if !errors.Is(err, TmuxNoSessionsError) {
+		t.Error(err)
+	}
+  if len(sessionsPerGroup) != 0 {
+    t.Error("No group should be returned")
+  }
+}
+
+func TestCreateGroup(t *testing.T) {
+  sshServer, portNo := newSSHServer()
+  defer sshServer.stop()
+  conf := baseConf
+  conf.portNo = int(portNo)
+
+  group := "foo"
+  err := createGroup(group, "localhost", &conf)
+  if err != nil {
+    t.Error(err)
+  }
+	sessionsPerGroup, err := fetchSessionsPerGroup("localhost", &conf)
+  if err != nil {
+    t.Error(err)
+  }
+  if _, ok := sessionsPerGroup[group]; !ok {
+    t.Errorf("Group not found: %v\n", sessionsPerGroup)
+  }
+}
+
+func TestAddSessionsToGroup(t *testing.T) {
+  sshServer, portNo := newSSHServer()
+  defer sshServer.stop()
+  conf := baseConf
+  conf.portNo = int(portNo)
+
+  group := "foo"
+  err := createGroup("foo", "localhost",&conf)
+  if err != nil {
+    t.Error(err)
+  }
+  for i := 1; i < 10; i++ {
+    nextSess, err := addSessionToGroup("localhost", group,&conf)
+    expectedNextSess := fmt.Sprintf("session%d",i)
+    if nextSess != expectedNextSess {
+      t.Errorf("Unexpected next session: %s is not %s",nextSess,expectedNextSess)
+    }
+    sessionsPerGroup, err := fetchSessionsPerGroup("localhost", &conf)
+    if err != nil {
+      t.Error(err)
+    }
+    if _, ok := sessionsPerGroup["foo"][expectedNextSess]; !ok {
+      t.Errorf("Next session not found: %v\n", sessionsPerGroup["foo"])
+    }
+  }
+}
+
+func TestKillSessions(t *testing.T) {
+  sshServer, portNo := newSSHServer()
+  defer sshServer.stop()
+  conf := baseConf
+  conf.portNo = int(portNo)
+
+  group := "foo"
+  err := createGroup("foo", "localhost",&conf)
+  if err != nil {
+    t.Error(err)
+  }
+  for i := 1; i < 10; i++ {
+    nextSess, err := addSessionToGroup("localhost", group,&conf)
+    expectedNextSess := fmt.Sprintf("session%d",i)
+    if nextSess != expectedNextSess {
+      t.Errorf("Unexpected next session: %s is not %s",nextSess,expectedNextSess)
+    }
+    sessionsPerGroup, err := fetchSessionsPerGroup("localhost", &conf)
+    if err != nil {
+      t.Error(err)
+    }
+    if _, ok := sessionsPerGroup[group][expectedNextSess]; !ok {
+      t.Errorf("Next session not found: %v\n", sessionsPerGroup[group])
+    }
+  }
+
+  for i := range []int{0, 3, 5, 7, 9} {
+    targetSess := fmt.Sprintf("session%d",i)
+    err = killSession("localhost", group, targetSess, &conf)
+    if err != nil {
+      t.Error(err)
+    }
+    sessionsPerGroup, err := fetchSessionsPerGroup("localhost", &conf)
+    if err != nil {
+      t.Error(err)
+    }
+    if _, ok := sessionsPerGroup[group][targetSess]; ok {
+      t.Errorf("Session should be gone: %v\n", sessionsPerGroup[group])
+    }
+  }
 }

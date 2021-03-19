@@ -10,4 +10,7 @@ build: $(APP_NAME)
 test:
 	go test
 
+fmt:
+	gofmt -w *.go
+
 .PHONY: test
