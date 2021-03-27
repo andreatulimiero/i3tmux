@@ -53,17 +53,17 @@ func deserializeGroupSessFromCon(con *i3.Node) (string, string, error) {
 }
 
 func fetchSessionsPerGroup(host string, conf *Conf) (SessionsPerGroup, error) {
-  client, err := NewClient(host, conf)
+	client, err := NewClient(host, conf)
 	if err != nil {
-    return nil, fmt.Errorf("unable to create client: %w", err)
+		return nil, fmt.Errorf("unable to create client: %w", err)
 	}
-  stdout, stderr, err := client.Run(`tmux ls -F "#{session_name}"`)
+	stdout, stderr, err := client.Run(`tmux ls -F "#{session_name}"`)
 	if err != nil {
 		if strings.Contains(stderr, "no server running on ") ||
-       strings.Contains(stderr, "No such file or directory") {
+			strings.Contains(stderr, "No such file or directory") {
 			return nil, TmuxNoSessionsError
 		}
-    return nil, fmt.Errorf("%s: %w", stderr, err)
+		return nil, fmt.Errorf("%s: %w", stderr, err)
 	}
 	lines := strings.Split(stdout, "\n")
 	sessionsPerGroup := make(map[string]map[string]bool)
@@ -127,33 +127,33 @@ func addSessionToGroup(host, group string, conf *Conf) (string, error) {
 	}
 	nextSess := fmt.Sprintf("session%d", nextSessIdx)
 	log.Println("Adding session to group", group, nextSess)
-  err = createSession(host, group, nextSess, conf)
-  if err != nil {
-    return "", err
-  }
-  return nextSess, nil
+	err = createSession(host, group, nextSess, conf)
+	if err != nil {
+		return "", err
+	}
+	return nextSess, nil
 }
 
 func createSession(host, group, sess string, conf *Conf) error {
-  client, err := NewClient(host, conf)
+	client, err := NewClient(host, conf)
 	if err != nil {
-    return fmt.Errorf("unable to create client: %w", err)
+		return fmt.Errorf("unable to create client: %w", err)
 	}
-  cmd := fmt.Sprintf("tmux new -d -s %s",serializeGroupSess(group, sess))
-  _, _, err = client.Run(cmd)
-  return err
+	cmd := fmt.Sprintf("tmux new -d -s %s", serializeGroupSess(group, sess))
+	_, _, err = client.Run(cmd)
+	return err
 }
 
 func killSession(host, group, sess string, conf *Conf) error {
-  client, err := NewClient(host, conf)
+	client, err := NewClient(host, conf)
 	if err != nil {
-    return fmt.Errorf("unable to create client: %w", err)
+		return fmt.Errorf("unable to create client: %w", err)
 	}
-  groupSess := serializeGroupSess(group, sess)
-  cmd := fmt.Sprintf("tmux kill-session -t %s",groupSess)
-  _, stderr, err := client.Run(cmd)
+	groupSess := serializeGroupSess(group, sess)
+	cmd := fmt.Sprintf("tmux kill-session -t %s", groupSess)
+	_, stderr, err := client.Run(cmd)
 	if err != nil {
-    return fmt.Errorf("unable to execute remote cmd: %s, %s, %w", cmd, stderr, err)
+		return fmt.Errorf("unable to execute remote cmd: %s, %s, %w", cmd, stderr, err)
 	}
-  return nil
+	return nil
 }

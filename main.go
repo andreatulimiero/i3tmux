@@ -79,7 +79,7 @@ func createGroup(group, host string, conf *Conf) error {
 	if _, ok := sessionsPerGroup[group]; ok {
 		return fmt.Errorf("already exists")
 	}
-  return createSession(host, group, "session0", conf)
+	return createSession(host, group, "session0", conf)
 }
 
 func addWindow(terminalBin, nameFlag string, conf *Conf) error {
@@ -97,10 +97,10 @@ func addWindow(terminalBin, nameFlag string, conf *Conf) error {
 		return err
 	}
 
-  nextSess, err := addSessionToGroup(host, group, conf)
-  if err != nil {
-    return err
-  }
+	nextSess, err := addSessionToGroup(host, group, conf)
+	if err != nil {
+		return err
+	}
 	// Add new session remotely
 
 	err = launchTermForSession(host, group, nextSess, terminalBin, nameFlag)
@@ -116,13 +116,13 @@ func listSessionsGroup(host string, conf *Conf) error {
 	if err != nil {
 		return err
 	}
-  for g, sessions := range sessionsPerGroup {
-    fmt.Println(g + ":")
-    for s, _ := range sessions {
-      fmt.Printf("- %s\n", s)
-    }
-  }
-  return nil
+	for g, sessions := range sessionsPerGroup {
+		fmt.Println(g + ":")
+		for s, _ := range sessions {
+			fmt.Printf("- %s\n", s)
+		}
+	}
+	return nil
 }
 
 func detachSessionGroup() error {
@@ -211,20 +211,20 @@ func killSessionMode(conf *Conf) error {
 	if err != nil {
 		return err
 	}
-  err = killSession(host, group, session, conf)
-  if err != nil {
-    return err
-  }
+	err = killSession(host, group, session, conf)
+	if err != nil {
+		return err
+	}
 	log.Println("Killed session", serializeGroupSess(group, session))
 	return nil
 }
 
 func main() {
-  conf := Conf{
-    user: "root",
-    privKeyPath: "/home/heimdall/Repos/i3tmux/test_key",
-    portNo: 2222,
-  }
+	conf := Conf{
+		user:        "root",
+		privKeyPath: "/home/heimdall/Repos/i3tmux/test_key",
+		portNo:      2222,
+	}
 	flag.Parse()
 
 	if *hostFlag == "" && (*newMode != "" || *resumeMode != "" || *listMode) {
