@@ -20,8 +20,9 @@ var (
   globPortNo uint32 = 2222
   baseConf = Conf{
     user: "root",
-    privKeyPath: "/home/heimdall/Repos/i3tmux/test_key",
+    privKeyPath: "./test_key",
   }
+  containerCmd = "podman"
 )
 
 func init() {
@@ -32,10 +33,13 @@ func init() {
 	}
   err = runSteps([]*exec.Cmd{
     exec.Command("chmod", "0600", "test_key","test_key.pub"),
-		exec.Command("podman", "build", "-t",IMAGE_TAG, "-f", "Test.Dockerfile", "."),
+		exec.Command(containerCmd, "build", "-t",IMAGE_TAG, "-f", "Test.Dockerfile", "."),
   })
   if err != nil {
     panic(fmt.Errorf("error initializing environment: %w", err))
+  }
+  if cmd := os.Getenv("I3TMUX_TEST_CONTAINER_CMD"); cmd != "" {
+    containerCmd = cmd
   }
 }
 
@@ -58,7 +62,7 @@ func newSSHServer() (*SSHServer,uint32) {
   portNo := atomic.AddUint32(&globPortNo,1)
   portMapping := fmt.Sprintf("%d:22",portNo)
   err := runSteps([]*exec.Cmd{
-		exec.Command("podman", "run", "--rm", "-d", "-p", portMapping, "--name", containerName, IMAGE_TAG),
+		exec.Command(containerCmd, "run", "--rm", "-d", "-p", portMapping, "--name", containerName, IMAGE_TAG),
 	})
 	if err != nil {
 		panic(fmt.Errorf("error starting ssh server: %w", err))
@@ -68,7 +72,7 @@ func newSSHServer() (*SSHServer,uint32) {
 
 func (s *SSHServer) stop() {
   err := runSteps([]*exec.Cmd{
-    exec.Command("podman", "stop", s.containerName),
+    exec.Command(containerCmd, "stop", s.containerName),
 	})
 	if err != nil {
 		panic(fmt.Errorf("error stopping ssh server: %w", err))
