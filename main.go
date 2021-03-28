@@ -103,7 +103,7 @@ func addWindow(terminalBin, nameFlag string, conf *Conf) error {
 	}
 	// Add new session remotely
 
-	err = launchTermForSession(host, group, nextSess, terminalBin, nameFlag)
+	err = launchTermForSession(host, group, nextSess, terminalBin, nameFlag, conf)
 	if err != nil {
 		return err
 	}
@@ -190,7 +190,7 @@ func resumeSessionGroup(host, terminalBin, nameFlag string, conf *Conf) error {
 	// Try to load a layout for the target sessions group
 
 	for s, _ := range sessions {
-		err := launchTermForSession(host, *resumeMode, s, terminalBin, nameFlag)
+		err := launchTermForSession(host, *resumeMode, s, terminalBin, nameFlag, conf)
 		if err != nil {
 			log.Fatal(err)
 		}
