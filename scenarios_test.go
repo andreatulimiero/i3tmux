@@ -19,8 +19,9 @@ var (
 	globContName uint32 = 0
 	globPortNo   uint32 = 2222
 	baseConf            = Conf{
-		user:        "root",
-		privKeyPath: "./test_key",
+		hostname:     "localhost",
+		user:         "root",
+		identityFile: "./test_key",
 	}
 	containerCmd = "podman"
 )
@@ -85,7 +86,7 @@ func TestNoGroups(t *testing.T) {
 	conf := baseConf
 	conf.portNo = int(portNo)
 
-	sessionsPerGroup, err := fetchSessionsPerGroup("localhost", &conf)
+	sessionsPerGroup, err := fetchSessionsPerGroup(&conf)
 	if !errors.Is(err, TmuxNoSessionsError) {
 		t.Error(err)
 	}
@@ -101,11 +102,11 @@ func TestCreateGroup(t *testing.T) {
 	conf.portNo = int(portNo)
 
 	group := "foo"
-	err := createGroup(group, "localhost", &conf)
+	err := createGroup(group, &conf)
 	if err != nil {
 		t.Error(err)
 	}
-	sessionsPerGroup, err := fetchSessionsPerGroup("localhost", &conf)
+	sessionsPerGroup, err := fetchSessionsPerGroup(&conf)
 	if err != nil {
 		t.Error(err)
 	}
@@ -121,17 +122,17 @@ func TestAddSessionsToGroup(t *testing.T) {
 	conf.portNo = int(portNo)
 
 	group := "foo"
-	err := createGroup("foo", "localhost", &conf)
+	err := createGroup("foo", &conf)
 	if err != nil {
 		t.Error(err)
 	}
 	for i := 1; i < 10; i++ {
-		nextSess, err := addSessionToGroup("localhost", group, &conf)
+		nextSess, err := addSessionToGroup(group, &conf)
 		expectedNextSess := fmt.Sprintf("session%d", i)
 		if nextSess != expectedNextSess {
 			t.Errorf("Unexpected next session: %s is not %s", nextSess, expectedNextSess)
 		}
-		sessionsPerGroup, err := fetchSessionsPerGroup("localhost", &conf)
+		sessionsPerGroup, err := fetchSessionsPerGroup(&conf)
 		if err != nil {
 			t.Error(err)
 		}
@@ -148,17 +149,17 @@ func TestKillSessions(t *testing.T) {
 	conf.portNo = int(portNo)
 
 	group := "foo"
-	err := createGroup("foo", "localhost", &conf)
+	err := createGroup("foo", &conf)
 	if err != nil {
 		t.Error(err)
 	}
 	for i := 1; i < 10; i++ {
-		nextSess, err := addSessionToGroup("localhost", group, &conf)
+		nextSess, err := addSessionToGroup(group, &conf)
 		expectedNextSess := fmt.Sprintf("session%d", i)
 		if nextSess != expectedNextSess {
 			t.Errorf("Unexpected next session: %s is not %s", nextSess, expectedNextSess)
 		}
-		sessionsPerGroup, err := fetchSessionsPerGroup("localhost", &conf)
+		sessionsPerGroup, err := fetchSessionsPerGroup(&conf)
 		if err != nil {
 			t.Error(err)
 		}
@@ -169,11 +170,11 @@ func TestKillSessions(t *testing.T) {
 
 	for i := range []int{0, 3, 5, 7, 9} {
 		targetSess := fmt.Sprintf("session%d", i)
-		err = killSession("localhost", group, targetSess, &conf)
+		err = killSession(group, targetSess, &conf)
 		if err != nil {
 			t.Error(err)
 		}
-		sessionsPerGroup, err := fetchSessionsPerGroup("localhost", &conf)
+		sessionsPerGroup, err := fetchSessionsPerGroup(&conf)
 		if err != nil {
 			t.Error(err)
 		}

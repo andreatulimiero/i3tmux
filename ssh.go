@@ -11,8 +11,8 @@ type Client struct {
 	*ssh.Client
 }
 
-func NewClient(host string, conf *Conf) (*Client, error) {
-	key, err := ioutil.ReadFile(conf.privKeyPath)
+func NewClient(conf *Conf) (*Client, error) {
+	key, err := ioutil.ReadFile(conf.identityFile)
 	if err != nil {
 		return nil, fmt.Errorf("unable to read private key: %w", err)
 	}
@@ -28,7 +28,7 @@ func NewClient(host string, conf *Conf) (*Client, error) {
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 		// FIXME: check server's key
 	}
-	client, err := ssh.Dial("tcp", fmt.Sprintf("%s:%d", host, conf.portNo), config)
+	client, err := ssh.Dial("tcp", fmt.Sprintf("%s:%d", conf.hostname, conf.portNo), config)
 	if err != nil {
 		return nil, fmt.Errorf("unable to dial: %w", err)
 	}

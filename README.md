@@ -11,20 +11,21 @@ You can check out the wiki to learn more about how i3tmux works (coming soon).
 
 ## Start Using It
 _i3tmux_ is not reinventing the wheel -- you could perform all _i3tmux_ actions manually.  
-Here are the main commands to get you started
+To better integrate with your existing workflow, host options are read from the `~/.ssh/config` file.  
+Here are the main commands to get you started.
 
 **N.B.**: in the `--nameFlag` parameter, you need to pass the flag used by your terminal of choice to set the name part of the `WM_CLASS` property
 (e.g., for [kitty](https://github.com/kovidgoyal/kitty) it would be `--name`).
 ### Create a new group
 Each session is part of a group. You can create a new group with the following command:
 ```
-i3tmux -host <host_address> -new <group_name>
+i3tmux -host <host> -new <group_name>
 ```
 This command also creates a session in the new group.
 ### Resume A Group
 To resume a group of sessions, you can use the following:
 ```
-i3tmux -host <host_address> -resume <group_name> -terminal <terminal> -nameFlag <terminal_name_flag>
+i3tmux -host <host> -resume <group_name> -terminal <terminal> -nameFlag <terminal_name_flag>
 ```
 The layout of the group, before detachment, is reestablished too.
 ### Add And Kill Sessions
@@ -53,9 +54,6 @@ Here is a demo of the following commands:
 
 ## Build and install
 Run `make build` and place the `i3tmux` executable in a folder contained in `$PATH`.
-### Specify remote host configuration
-Currently, part of the configuration is still hardcoded (this is to change very soon).  
-To specify your ssh server options, you can change them in `main.go::main()`.
 
 ## Testing
 To run the tests just run `make test`.

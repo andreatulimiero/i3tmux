@@ -68,21 +68,21 @@ func init() {
 	// Chdir to ~/.config/i3tmux/
 }
 
-func createGroup(group, host string, conf *Conf) error {
+func createGroup(group string, conf *Conf) error {
 	if strings.Contains(group, GROUP_SESS_DELIM) {
 		return fmt.Errorf("group name cannot contain '%s'", GROUP_SESS_DELIM)
 	}
-	sessionsPerGroup, err := fetchSessionsPerGroup(host, conf)
+	sessionsPerGroup, err := fetchSessionsPerGroup(conf)
 	if err != nil && !errors.Is(err, TmuxNoSessionsError) {
 		return fmt.Errorf("error fetching sessions: %s", err)
 	}
 	if _, ok := sessionsPerGroup[group]; ok {
 		return fmt.Errorf("already exists")
 	}
-	return createSession(host, group, "session0", conf)
+	return createSession(group, "session0", conf)
 }
 
-func addWindow(terminalBin, nameFlag string, conf *Conf) error {
+func addWindow(terminalBin, nameFlag string) error {
 	// TODO: Add swallow container first to inform user operation is being performed?
 	tree, err := i3.GetTree()
 	if err != nil {
@@ -92,33 +92,37 @@ func addWindow(terminalBin, nameFlag string, conf *Conf) error {
 	if err != nil {
 		return err
 	}
-	host, group, _, err := deserializeHostGroupSessFromCon(con)
+	_, group, _, err := deserializeHostGroupSessFromCon(con)
 	if err != nil {
 		return err
 	}
+	conf, err := getConfForHost(*hostFlag)
+	if err != nil {
+		log.Fatal(fmt.Errorf("Error parsing ~/.ssh/config: %w", err))
+	}
 
-	nextSess, err := addSessionToGroup(host, group, conf)
+	nextSess, err := addSessionToGroup(group, conf)
 	if err != nil {
 		return err
 	}
 	// Add new session remotely
 
-	err = launchTermForSession(host, group, nextSess, terminalBin, nameFlag, conf)
+	err = launchTermForSession(group, nextSess, terminalBin, nameFlag, conf)
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func listSessionsGroup(host string, conf *Conf) error {
+func listSessionsGroup(conf *Conf) error {
 	fmt.Println("Retrieving available sessions groups ...")
-	sessionsPerGroup, err := fetchSessionsPerGroup(host, conf)
+	sessionsPerGroup, err := fetchSessionsPerGroup(conf)
 	if err != nil {
 		return err
 	}
 	for g, sessions := range sessionsPerGroup {
 		fmt.Println(g + ":")
-		for s, _ := range sessions {
+		for s := range sessions {
 			fmt.Printf("- %s\n", s)
 		}
 	}
@@ -159,8 +163,8 @@ func detachSessionGroup() error {
 	return nil
 }
 
-func resumeSessionGroup(host, terminalBin, nameFlag string, conf *Conf) error {
-	sessionsPerGroup, err := fetchSessionsPerGroup(host, conf)
+func resumeSessionGroup(terminalBin, nameFlag string, conf *Conf) error {
+	sessionsPerGroup, err := fetchSessionsPerGroup(conf)
 	if err != nil {
 		return err
 	}
@@ -189,8 +193,8 @@ func resumeSessionGroup(host, terminalBin, nameFlag string, conf *Conf) error {
 	}
 	// Try to load a layout for the target sessions group
 
-	for s, _ := range sessions {
-		err := launchTermForSession(host, *resumeMode, s, terminalBin, nameFlag, conf)
+	for s := range sessions {
+		err := launchTermForSession(*resumeMode, s, terminalBin, nameFlag, conf)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -207,11 +211,11 @@ func killSessionMode(conf *Conf) error {
 	if err != nil {
 		return err
 	}
-	host, group, session, err := deserializeHostGroupSessFromCon(con)
+	_, group, session, err := deserializeHostGroupSessFromCon(con)
 	if err != nil {
 		return err
 	}
-	err = killSession(host, group, session, conf)
+	err = killSession(group, session, conf)
 	if err != nil {
 		return err
 	}
@@ -220,15 +224,21 @@ func killSessionMode(conf *Conf) error {
 }
 
 func main() {
-	conf := Conf{
-		user:        "root",
-		privKeyPath: "/home/heimdall/Repos/i3tmux/test_key",
-		portNo:      2222,
-	}
 	flag.Parse()
 
-	if *hostFlag == "" && (*newMode != "" || *resumeMode != "" || *listMode) {
-		log.Fatal(fmt.Errorf("You must specify the target host"))
+	var (
+		conf *Conf
+		err  error
+	)
+	if *newMode != "" || *resumeMode != "" || *listMode {
+		if *hostFlag == "" {
+			log.Fatal(fmt.Errorf("You must specify the target host"))
+		} else {
+			conf, err = getConfForHost(*hostFlag)
+			if err != nil {
+				log.Fatal(fmt.Errorf("Error parsing ~/.ssh/config: %w", err))
+			}
+		}
 	}
 
 	modsCount := 0
@@ -256,12 +266,12 @@ func main() {
 	// Ensure only one mode is selected
 
 	if *newMode != "" {
-		if err := createGroup(*newMode, *hostFlag, &conf); err != nil {
+		if err := createGroup(*newMode, conf); err != nil {
 			log.Fatal(fmt.Errorf("Error creating new sessions group: %w", err))
 		}
 	}
 	if *addMode {
-		if err := addWindow(*terminalBinFlag, *terminalNameFlag, &conf); err != nil {
+		if err := addWindow(*terminalBinFlag, *terminalNameFlag); err != nil {
 			log.Fatal(fmt.Errorf("Error adding window: %w", err))
 		}
 	}
@@ -274,12 +284,12 @@ func main() {
 		if *terminalBinFlag == "" || *terminalNameFlag == "" {
 			log.Fatal(fmt.Errorf("You must specify the 'terminal' and 'nameFlag'"))
 		}
-		if err := resumeSessionGroup(*hostFlag, *terminalBinFlag, *terminalNameFlag, &conf); err != nil {
+		if err := resumeSessionGroup(*terminalBinFlag, *terminalNameFlag, conf); err != nil {
 			log.Fatal(fmt.Errorf("Error resuming group: %w", err))
 		}
 	}
 	if *listMode {
-		err := listSessionsGroup(*hostFlag, &conf)
+		err := listSessionsGroup(conf)
 		if err != nil {
 			errMsg := fmt.Sprintf("Error listing group: %s", err)
 			if errors.Is(err, TmuxNoSessionsError) {
@@ -289,7 +299,7 @@ func main() {
 		}
 	}
 	if *killMode {
-		if err := killSessionMode(&conf); err != nil {
+		if err := killSessionMode(conf); err != nil {
 			log.Fatal(fmt.Errorf("Error killing session: %w", err))
 		}
 	}

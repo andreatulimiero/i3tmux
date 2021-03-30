@@ -10,6 +10,6 @@ test:
 	go test -v
 
 fmt:
-	gofmt -w *.go
+	gofmt -s -w *.go
 
 .PHONY: test

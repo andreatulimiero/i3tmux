@@ -52,8 +52,8 @@ func deserializeGroupSessFromCon(con *i3.Node) (string, string, error) {
 	return deserializeGroupSessFromString(con.WindowProperties.Instance)
 }
 
-func fetchSessionsPerGroup(host string, conf *Conf) (SessionsPerGroup, error) {
-	client, err := NewClient(host, conf)
+func fetchSessionsPerGroup(conf *Conf) (SessionsPerGroup, error) {
+	client, err := NewClient(conf)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create client: %w", err)
 	}
@@ -84,7 +84,7 @@ func fetchSessionsPerGroup(host string, conf *Conf) (SessionsPerGroup, error) {
 func getNextSessIdx(sessionsPerGroup SessionsPerGroup, group string) (int, error) {
 	sessions := sessionsPerGroup[group]
 	var idxs []int
-	for s, _ := range sessions {
+	for s := range sessions {
 		res := sessionFmtRe.FindStringSubmatch(s)
 		if len(res) != 2 {
 			return -1, fmt.Errorf("malformed session '%s'", s)
@@ -104,25 +104,25 @@ func getNextSessIdx(sessionsPerGroup SessionsPerGroup, group string) (int, error
 	return len(sessions), nil
 }
 
-func launchTermForSession(host, group, session, terminalBin, nameFlag string, conf *Conf) error {
+func launchTermForSession(group, session, terminalBin, nameFlag string, conf *Conf) error {
 	sshCmd := fmt.Sprintf("ssh %s@%s -p %d -i %s -t tmux attach -t %s",
 		conf.user,
-		host,
+		conf.hostname,
 		conf.portNo,
-		conf.privKeyPath,
+		conf.identityFile,
 		serializeGroupSess(group, session))
 	log.Println(sshCmd)
 	i3cmd := fmt.Sprintf("exec %s %s '%s' %s",
 		terminalBin,
 		nameFlag,
-		serializeHostGroupSess(host, group, session),
+		serializeHostGroupSess(conf.host, group, session),
 		sshCmd)
 	_, err := i3.RunCommand(i3cmd)
 	return err
 }
 
-func addSessionToGroup(host, group string, conf *Conf) (string, error) {
-	sessionsPerGroup, err := fetchSessionsPerGroup(host, conf)
+func addSessionToGroup(group string, conf *Conf) (string, error) {
+	sessionsPerGroup, err := fetchSessionsPerGroup(conf)
 	if err != nil {
 		return "", err
 	}
@@ -132,15 +132,15 @@ func addSessionToGroup(host, group string, conf *Conf) (string, error) {
 	}
 	nextSess := fmt.Sprintf("session%d", nextSessIdx)
 	log.Println("Adding session to group", group, nextSess)
-	err = createSession(host, group, nextSess, conf)
+	err = createSession(group, nextSess, conf)
 	if err != nil {
 		return "", err
 	}
 	return nextSess, nil
 }
 
-func createSession(host, group, sess string, conf *Conf) error {
-	client, err := NewClient(host, conf)
+func createSession(group, sess string, conf *Conf) error {
+	client, err := NewClient(conf)
 	if err != nil {
 		return fmt.Errorf("unable to create client: %w", err)
 	}
@@ -149,8 +149,8 @@ func createSession(host, group, sess string, conf *Conf) error {
 	return err
 }
 
-func killSession(host, group, sess string, conf *Conf) error {
-	client, err := NewClient(host, conf)
+func killSession(group, sess string, conf *Conf) error {
+	client, err := NewClient(conf)
 	if err != nil {
 		return fmt.Errorf("unable to create client: %w", err)
 	}
