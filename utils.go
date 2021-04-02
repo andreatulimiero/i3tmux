@@ -104,7 +104,7 @@ func getNextSessIdx(sessionsPerGroup SessionsPerGroup, group string) (int, error
 	return len(sessions), nil
 }
 
-func launchTermForSession(group, session, terminalBin, nameFlag string, conf *Conf) error {
+func launchTermForSession(group, session string, pref *Pref, conf *Conf) error {
 	sshCmd := fmt.Sprintf("ssh %s@%s -p %d -i %s -t tmux attach -t %s",
 		conf.user,
 		conf.hostname,
@@ -113,8 +113,8 @@ func launchTermForSession(group, session, terminalBin, nameFlag string, conf *Co
 		serializeGroupSess(group, session))
 	log.Println(sshCmd)
 	i3cmd := fmt.Sprintf("exec %s %s '%s' %s",
-		terminalBin,
-		nameFlag,
+		pref.Terminal.Bin,
+		pref.Terminal.NameFlag,
 		serializeHostGroupSess(conf.host, group, session),
 		sshCmd)
 	_, err := i3.RunCommand(i3cmd)

@@ -116,6 +116,9 @@ func TestCreateGroup(t *testing.T) {
 }
 
 func TestAddSessionsToGroup(t *testing.T) {
+	const (
+		SESSIONS_TO_ADD = 5
+	)
 	sshServer, portNo := newSSHServer()
 	defer sshServer.stop()
 	conf := baseConf
@@ -126,7 +129,7 @@ func TestAddSessionsToGroup(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	for i := 1; i < 10; i++ {
+	for i := 1; i < SESSIONS_TO_ADD; i++ {
 		nextSess, err := addSessionToGroup(group, &conf)
 		expectedNextSess := fmt.Sprintf("session%d", i)
 		if nextSess != expectedNextSess {
@@ -153,7 +156,10 @@ func TestKillSessions(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	for i := 1; i < 10; i++ {
+	const (
+		SESSIONS_TO_ADD = 5
+	)
+	for i := 1; i < SESSIONS_TO_ADD; i++ {
 		nextSess, err := addSessionToGroup(group, &conf)
 		expectedNextSess := fmt.Sprintf("session%d", i)
 		if nextSess != expectedNextSess {
@@ -168,7 +174,7 @@ func TestKillSessions(t *testing.T) {
 		}
 	}
 
-	for i := range []int{0, 3, 5, 7, 9} {
+	for i := 1; i < SESSIONS_TO_ADD; i += 2 {
 		targetSess := fmt.Sprintf("session%d", i)
 		err = killSession(group, targetSess, &conf)
 		if err != nil {

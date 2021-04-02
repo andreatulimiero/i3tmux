@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"os/user"
 	"path"
@@ -9,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/kevinburke/ssh_config"
+	"gopkg.in/yaml.v2"
 )
 
 type Conf struct {
@@ -80,6 +82,35 @@ func getConfForHost(host string) (*Conf, error) {
 	}
 	conf.identityFile = identityFile
 
-	fmt.Println(conf)
 	return conf, nil
+}
+
+// Pref struct holds user preferences
+type Pref struct {
+	Terminal struct {
+		Bin      string
+		NameFlag string `yaml:"nameFlag"`
+	}
+}
+
+func getUserPreferences() *Pref {
+	pref := Pref{}
+	dotFilePath := path.Join(os.Getenv("HOME"), ".config", "i3tmux", "config.yaml")
+	dotFile, err := os.ReadFile(dotFilePath)
+	if err == nil {
+		err := yaml.Unmarshal(dotFile, &pref)
+		if err == nil {
+		} else {
+			log.Println("Dotfile is invalid, using flags or default values")
+		}
+	} else {
+		log.Println(fmt.Errorf("Couldn't open dotfile, using flags or default values: %w", err))
+	}
+	if *terminalBinFlag != "" {
+		pref.Terminal.Bin = *terminalBinFlag
+	}
+	if *terminalNameFlag != "" {
+		pref.Terminal.NameFlag = *terminalNameFlag
+	}
+	return &pref
 }

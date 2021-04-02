@@ -82,7 +82,7 @@ func createGroup(group string, conf *Conf) error {
 	return createSession(group, "session0", conf)
 }
 
-func addWindow(terminalBin, nameFlag string) error {
+func addWindow(pref *Pref) error {
 	// TODO: Add swallow container first to inform user operation is being performed?
 	tree, err := i3.GetTree()
 	if err != nil {
@@ -92,11 +92,11 @@ func addWindow(terminalBin, nameFlag string) error {
 	if err != nil {
 		return err
 	}
-	_, group, _, err := deserializeHostGroupSessFromCon(con)
+	host, group, _, err := deserializeHostGroupSessFromCon(con)
 	if err != nil {
 		return err
 	}
-	conf, err := getConfForHost(*hostFlag)
+	conf, err := getConfForHost(host)
 	if err != nil {
 		log.Fatal(fmt.Errorf("Error parsing ~/.ssh/config: %w", err))
 	}
@@ -107,7 +107,7 @@ func addWindow(terminalBin, nameFlag string) error {
 	}
 	// Add new session remotely
 
-	err = launchTermForSession(group, nextSess, terminalBin, nameFlag, conf)
+	err = launchTermForSession(group, nextSess, pref, conf)
 	if err != nil {
 		return err
 	}
@@ -163,7 +163,7 @@ func detachSessionGroup() error {
 	return nil
 }
 
-func resumeSessionGroup(terminalBin, nameFlag string, conf *Conf) error {
+func resumeSessionGroup(pref *Pref, conf *Conf) error {
 	sessionsPerGroup, err := fetchSessionsPerGroup(conf)
 	if err != nil {
 		return err
@@ -194,7 +194,7 @@ func resumeSessionGroup(terminalBin, nameFlag string, conf *Conf) error {
 	// Try to load a layout for the target sessions group
 
 	for s := range sessions {
-		err := launchTermForSession(*resumeMode, s, terminalBin, nameFlag, conf)
+		err := launchTermForSession(*resumeMode, s, pref, conf)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -202,7 +202,7 @@ func resumeSessionGroup(terminalBin, nameFlag string, conf *Conf) error {
 	return nil
 }
 
-func killSessionMode(conf *Conf) error {
+func killSessionMode() error {
 	tree, err := i3.GetTree()
 	if err != nil {
 		return err
@@ -211,9 +211,13 @@ func killSessionMode(conf *Conf) error {
 	if err != nil {
 		return err
 	}
-	_, group, session, err := deserializeHostGroupSessFromCon(con)
+	host, group, session, err := deserializeHostGroupSessFromCon(con)
 	if err != nil {
 		return err
+	}
+	conf, err := getConfForHost(host)
+	if err != nil {
+		log.Fatal(fmt.Errorf("Error parsing ~/.ssh/config: %w", err))
 	}
 	err = killSession(group, session, conf)
 	if err != nil {
@@ -224,12 +228,12 @@ func killSessionMode(conf *Conf) error {
 }
 
 func main() {
-	flag.Parse()
-
 	var (
 		conf *Conf
 		err  error
 	)
+	flag.Parse()
+	pref := getUserPreferences()
 	if *newMode != "" || *resumeMode != "" || *listMode {
 		if *hostFlag == "" {
 			log.Fatal(fmt.Errorf("You must specify the target host"))
@@ -271,7 +275,7 @@ func main() {
 		}
 	}
 	if *addMode {
-		if err := addWindow(*terminalBinFlag, *terminalNameFlag); err != nil {
+		if err := addWindow(pref); err != nil {
 			log.Fatal(fmt.Errorf("Error adding window: %w", err))
 		}
 	}
@@ -284,7 +288,7 @@ func main() {
 		if *terminalBinFlag == "" || *terminalNameFlag == "" {
 			log.Fatal(fmt.Errorf("You must specify the 'terminal' and 'nameFlag'"))
 		}
-		if err := resumeSessionGroup(*terminalBinFlag, *terminalNameFlag, conf); err != nil {
+		if err := resumeSessionGroup(pref, conf); err != nil {
 			log.Fatal(fmt.Errorf("Error resuming group: %w", err))
 		}
 	}
@@ -299,7 +303,7 @@ func main() {
 		}
 	}
 	if *killMode {
-		if err := killSessionMode(conf); err != nil {
+		if err := killSessionMode(); err != nil {
 			log.Fatal(fmt.Errorf("Error killing session: %w", err))
 		}
 	}
