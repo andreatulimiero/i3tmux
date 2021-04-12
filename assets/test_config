@@ -1,0 +1,4 @@
+Host i3tmux
+  Hostname localhost
+  User root
+  IdentityFile ~/.ssh/test_key

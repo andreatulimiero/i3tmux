@@ -6,58 +6,60 @@ Lately, I found myself working a lot with _tmux_ on remote servers.
 Although a custom _tmux_ configuration let me manage panes in a semi-productive way, I still felt slow without _i3wm_.
 > I was looking for a way to manage _tmux_ panes with _i3wm_ as if they were local terminal windows.
 
-i3tmux lets you do exactly this!  
+_i3tmux_ lets you do exactly this! Plus some goodies like sessions **multiplexing**, to keep the experience **lag free**<sup>1</sup>, and **layout resumption**.  
 You can check out the wiki to learn more about how i3tmux works (coming soon).
 
-## Start Using It
-_i3tmux_ is not reinventing the wheel -- you could perform all _i3tmux_ actions manually.  
-To better integrate with your existing workflow, host options are read from the `~/.ssh/config` file.  
-Here are the main commands to get you started.
-
-**N.B.**: in the `--nameFlag` parameter, you need to pass the flag used by your terminal of choice to set the name part of the `WM_CLASS` property
-(e.g., for [kitty](https://github.com/kovidgoyal/kitty) it would be `--name`).
-### Create a new group
+## Get started
+### Indicate your terminal preference
+You can specify your preferred terminal emulator -- to spawn sessions windows -- with a dotfile at `~/.config/i3tmux/config.yaml`like this:
+```yaml
+terminal:
+  bin: xterm
+  nameFlag: -name
+```
+### Add i3 shortcuts
+To perform the main actions like `add` and `kill` a session or `detach` a group, you can add the following shortcuts to your _i3wm_ config file.
+Here is an example<sup>2</sup>:
+```
+bindsym $caps+Shift+Return exec i3tmux --add
+bindsym $caps+Shift+q exec i3tmux --kill
+bindsym $caps+Shift+d exec i3tmux --detach
+```
+### Start Using It!
+Host options are parsed from your `~/.ssh/config` file, so you are ready to go!
+##### Create a new group
 Each session is part of a group. You can create a new group with the following command:
 ```
-i3tmux -host <host> -new <group_name>
+i3tmux -host <host> -create <group_name>
 ```
-This command also creates a session in the new group.
-### Resume A Group
+To confirm that the group was created, you can list existing groups with the following:
+```
+i3tmux -host <host> -list
+```
+As you should see from the output, the _create_ command also creates a session in the group.
+#### Resume A Group
 To resume a group of sessions, you can use the following:
 ```
-i3tmux -host <host> -resume <group_name> -terminal <terminal> -nameFlag <terminal_name_flag>
+i3tmux -host <host> -resume <group_name>
 ```
-The layout of the group, before detachment, is reestablished too.
-### Add And Kill Sessions
-To add and kill sessions, you can specify shortcuts like in the following example.  
-Although you don't need to use "i3wm" bindings, I recommended you do so.
-```
-bindsym $caps+Shift+Return exec i3tmux --add --terminal <terminal> --nameFlag <terminal_name_flag>
-bindsym $caps+Shift+q exec i3tmux --kill
-```
+When a group gets detached and resumed, its layout reestablished too.
+#### Add And Kill Sessions
+You can quickly _add_ (or _kill_) a session to a group by having the focus on a session window and using the shortcuts defined above.  
 Killing a window means also closing it remotely on the server.
-### Detach A Group
-To detach a group (i.e., locally closing all the windows that belong to it) you can specify a shortcut like in the following example:
-```
-bindsym $caps+Shift+q exec i3tmux --detach
-```
-When you detach a group, "i3tmux" also saves its layout, so when you resume it, i3tmux will arrange the windows in the same way.
-
-### Demo
-Here is a demo of the following commands:
-- resume a group,
-- add two windows,
-- kill one window,
-- detach the group and resume it again.  
-
-![i3tmux demo](https://media.giphy.com/media/s1A2PG0k8oDLJhlsGu/giphy.gif)
+#### Detach A Group
+You can simply detach a group by having the focus on a session window of the group and using the shortcut defined above.  
+Detaching means (locally) closing all the windows that belong to it and save its layout.
 
 ## Build and install
-Run `make build` and place the `i3tmux` executable in a folder contained in `$PATH`.
+To install _i3tmux_ you can either run `make build`, and place the `i3tmux` executable in a folder contained in `$PATH`, or use `go install`, and make sure that `$GOBIN` is in `$PATH`.
 
 ## Testing
 To run the tests just run `make test`.
-`Podman` (or `Docker`) is required to spawn fresh, OpenSSH server instances for tests.
+`Podman` (or `Docker`) is required to spawn isolated environments for tests.
 
 ## State Of The Project
 This project is in alpha stage.
+
+### Footnotes
+<sup>1</sup>: Being a network based interaction this is limited to RTT.  
+<sup>2</sup>: I remapped my caps lock to `$caps`.

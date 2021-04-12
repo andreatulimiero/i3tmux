@@ -2,17 +2,18 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
+	"golang.org/x/term"
 	"io/ioutil"
 	"log"
-	"log/syslog"
+	// "log/syslog"
 	"os"
+	"os/signal"
 	"os/user"
 	"path"
 	"regexp"
-	"strings"
+	"syscall"
 
 	"go.i3wm.org/i3/v4"
 )
@@ -20,6 +21,7 @@ import (
 const (
 	GROUP_SESS_DELIM = "_"
 	HOST_DELIM       = "@"
+	I3TMUX_BIN       = "i3tmux"
 )
 
 var (
@@ -27,26 +29,31 @@ var (
 	terminalNameFlag = flag.String("nameFlag", "", "the flag used by the terminal of choice"+
 		"to define the window instance name")
 	hostFlag     = flag.String("host", "", "remote host where tmux server runs")
-	newMode      = flag.String("new", "", "create new group")
-	addMode      = flag.Bool("add", false, "add window to the current group")
-	listMode     = flag.Bool("list", false, "list sessions groups")
-	resumeMode   = flag.String("resume", "", "resume group")
-	detachMode   = flag.Bool("detach", false, "detach current group")
-	killMode     = flag.Bool("kill", false, "kill current session locally and remotely")
+	sessionFlag  = flag.String("session", "", "session to attach shell to")
+	createCmd    = flag.String("create", "", "create new group")
+	addCmd       = flag.Bool("add", false, "add window to the current group")
+	listCmd      = flag.Bool("list", false, "list sessions groups")
+	resumeCmd    = flag.String("resume", "", "resume group")
+	detachCmd    = flag.Bool("detach", false, "detach current group")
+	killCmd      = flag.Bool("kill", false, "kill current session locally and remotely")
+	shellCmd     = flag.Bool("shell", false, "spawn shell for session")
+	serverCmd    = flag.Bool("server", false, "run i3tmux server")
 	sessionFmtRe = regexp.MustCompile(`^[a-zA-Z]*(\d+)$`)
 
-	TmuxNoSessionsError = errors.New("tmux no sessions")
+	pref Pref
 )
 
-type SessionsPerGroup map[string]map[string]bool
+type SessionsPerGroup map[string]Sessions
+type Sessions map[string]bool
 
 func init() {
-	logwriter, err := syslog.New(syslog.LOG_INFO, "i3tmux")
-	if err != nil {
-		log.Fatal(err)
-	}
-	log.SetOutput(logwriter)
+	// logwriter, err := syslog.New(syslog.LOG_INFO, "i3tmux")
+	// if err != nil {
+	// log.Fatal(err)
+	// }
+	// log.SetOutput(logwriter)
 	// Set logger to use syslog
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
 	user, err := user.Current()
 	if err != nil {
@@ -60,7 +67,6 @@ func init() {
 			if err != nil {
 				log.Fatal(err)
 			}
-			log.Println("Created " + workingDir + " directory")
 		} else {
 			log.Fatal(err)
 		}
@@ -68,21 +74,34 @@ func init() {
 	// Chdir to ~/.config/i3tmux/
 }
 
-func createGroup(group string, conf *Conf) error {
-	if strings.Contains(group, GROUP_SESS_DELIM) {
-		return fmt.Errorf("group name cannot contain '%s'", GROUP_SESS_DELIM)
+func createAction(group, host string) error {
+	client, err := newClient()
+	if err != nil {
+		return err
 	}
-	sessionsPerGroup, err := fetchSessionsPerGroup(conf)
-	if err != nil && !errors.Is(err, TmuxNoSessionsError) {
-		return fmt.Errorf("error fetching sessions: %s", err)
+	defer client.Close()
+	// Create client
+
+	res, err := client.RequestResponse(&RequestCreate{RequestBase{host}, group})
+	if err != nil {
+		return err
 	}
-	if _, ok := sessionsPerGroup[group]; ok {
-		return fmt.Errorf("already exists")
+	errCode, errMsg := res.Error()
+	if errCode != ErrOk {
+		switch errCode {
+		case GroupAlreadyExistsError:
+			return fmt.Errorf("already exists")
+		default:
+			return fmt.Errorf("%s", errMsg)
+		}
 	}
-	return createSession(group, "session0", conf)
+	// Receive response
+
+	log.Println("Created new sessions group")
+	return res.Do(client, host)
 }
 
-func addWindow(pref *Pref) error {
+func addAction() error {
 	// TODO: Add swallow container first to inform user operation is being performed?
 	tree, err := i3.GetTree()
 	if err != nil {
@@ -96,40 +115,56 @@ func addWindow(pref *Pref) error {
 	if err != nil {
 		return err
 	}
-	conf, err := getConfForHost(host)
-	if err != nil {
-		log.Fatal(fmt.Errorf("Error parsing ~/.ssh/config: %w", err))
-	}
 
-	nextSess, err := addSessionToGroup(group, conf)
+	client, err := newClient()
 	if err != nil {
 		return err
 	}
-	// Add new session remotely
+	defer client.Close()
+	// Create client
 
-	err = launchTermForSession(group, nextSess, pref, conf)
+	res, err := client.RequestResponse(&RequestAdd{RequestBase{host}, group})
 	if err != nil {
 		return err
 	}
-	return nil
+	errCode, errMsg := res.Error()
+	if errCode != ErrOk {
+		return fmt.Errorf("%s", errMsg)
+	}
+	// Receive response
+
+	return res.Do(client, host)
 }
 
-func listSessionsGroup(conf *Conf) error {
+func listAction(host string) error {
 	fmt.Println("Retrieving available sessions groups ...")
-	sessionsPerGroup, err := fetchSessionsPerGroup(conf)
+	client, err := newClient()
 	if err != nil {
 		return err
 	}
-	for g, sessions := range sessionsPerGroup {
-		fmt.Println(g + ":")
-		for s := range sessions {
-			fmt.Printf("- %s\n", s)
+	defer client.Close()
+	// Create client
+
+	res, err := client.RequestResponse(&RequestList{RequestBase{host}})
+	if err != nil {
+		return err
+	}
+	errCode, errMsg := res.Error()
+	if errCode != ErrOk {
+		switch errCode {
+		case TmuxNoSessionsError:
+			fmt.Println("No session found")
+			return nil
+		default:
+			return fmt.Errorf("%s", errMsg)
 		}
 	}
-	return nil
+	// Receive response
+
+	return res.Do(client, host)
 }
 
-func detachSessionGroup() error {
+func detachAction() error {
 	tree, err := i3.GetTree()
 	if err != nil {
 		return err
@@ -163,46 +198,68 @@ func detachSessionGroup() error {
 	return nil
 }
 
-func resumeSessionGroup(pref *Pref, conf *Conf) error {
-	sessionsPerGroup, err := fetchSessionsPerGroup(conf)
+func resumeAction(group, host string) error {
+	fmt.Println("Retrieving available sessions groups ...")
+	client, err := newClient()
 	if err != nil {
 		return err
 	}
-	sessions, ok := sessionsPerGroup[*resumeMode]
-	if !ok {
-		return fmt.Errorf("group '%s' not found", *resumeMode)
-	}
+	defer client.Close()
+	// Create client
 
-	resumeLayoutPath := *resumeMode + ".json"
-	_, err = os.Stat(resumeLayoutPath)
+	res, err := client.RequestResponse(&RequestResume{RequestBase{host}, group})
 	if err != nil {
-		if !os.IsNotExist(err) {
-			log.Fatal(err)
-		}
-		// If error is not expected exit
-	} else {
-		cwd, err := os.Getwd()
-		if err != nil {
-			return err
-		}
-		absResumeLayoutPath := path.Join(cwd, resumeLayoutPath)
-		_, err = i3.RunCommand(fmt.Sprintf("append_layout %s", absResumeLayoutPath))
-		if err != nil {
-			log.Fatal(err)
+		return err
+	}
+	errCode, errMsg := res.Error()
+	if errCode != ErrOk {
+		switch errCode {
+		case TmuxNoSessionsError:
+			log.Println("No sessions found")
+			return nil
+		default:
+			return fmt.Errorf("%s", errMsg)
 		}
 	}
-	// Try to load a layout for the target sessions group
-
-	for s := range sessions {
-		err := launchTermForSession(*resumeMode, s, pref, conf)
-		if err != nil {
-			log.Fatal(err)
-		}
-	}
-	return nil
+	// Receive response
+	return res.Do(client, host)
 }
 
-func killSessionMode() error {
+func shellAction(session, host string) error {
+	client, err := newClient()
+	if err != nil {
+		return fmt.Errorf("creating client: %w", err)
+	}
+	defer client.Close()
+	// Create client
+
+	w, h, err := term.GetSize(int(os.Stdin.Fd()))
+	if err != nil {
+		return fmt.Errorf("getting size: %w", err)
+	}
+	winCh := make(chan os.Signal, 1)
+	signal.Notify(winCh, syscall.SIGWINCH)
+	go func() {
+		for {
+			<-winCh
+			w, h, err := term.GetSize(int(os.Stdin.Fd()))
+			if err != nil {
+				fmt.Printf("Error getting size: %s\n", err)
+			}
+			if err := client.enc.Encode(&WindowSize{w, h}); err != nil {
+				fmt.Printf("Error encoding size: %s\n", err)
+			}
+		}
+	}()
+
+	res, err := client.RequestResponse(&RequestShell{RequestBase{host}, session, w, h})
+	if err != nil {
+		return err
+	}
+	return res.Do(client, host)
+}
+
+func killAction() error {
 	tree, err := i3.GetTree()
 	if err != nil {
 		return err
@@ -215,96 +272,120 @@ func killSessionMode() error {
 	if err != nil {
 		return err
 	}
-	conf, err := getConfForHost(host)
-	if err != nil {
-		log.Fatal(fmt.Errorf("Error parsing ~/.ssh/config: %w", err))
-	}
-	err = killSession(group, session, conf)
+
+	client, err := newClient()
 	if err != nil {
 		return err
 	}
+	defer client.Close()
+	res, err := client.RequestResponse(&RequestKill{RequestBase{host}, group, session})
+	if err != nil {
+		return err
+	}
+	errCode, errMsg := res.Error()
+	if errCode != ErrOk {
+		switch errCode {
+		default:
+			return fmt.Errorf("%s", errMsg)
+		}
+	}
 	log.Println("Killed session", serializeGroupSess(group, session))
+	log.Println(res)
 	return nil
 }
 
+func serverAction() error {
+	s := newServer()
+	return s.Run()
+}
+
 func main() {
-	var (
-		conf *Conf
-		err  error
-	)
 	flag.Parse()
-	pref := getUserPreferences()
-	if *newMode != "" || *resumeMode != "" || *listMode {
+	pref = getUserPreferences()
+	if *createCmd != "" || *resumeCmd != "" || *listCmd || *shellCmd {
 		if *hostFlag == "" {
 			log.Fatal(fmt.Errorf("You must specify the target host"))
-		} else {
-			conf, err = getConfForHost(*hostFlag)
-			if err != nil {
-				log.Fatal(fmt.Errorf("Error parsing ~/.ssh/config: %w", err))
-			}
 		}
 	}
 
 	modsCount := 0
-	if *newMode != "" {
+	if *createCmd != "" {
 		modsCount++
 	}
-	if *addMode {
+	if *addCmd {
 		modsCount++
 	}
-	if *detachMode {
+	if *detachCmd {
 		modsCount++
 	}
-	if *resumeMode != "" {
+	if *resumeCmd != "" {
 		modsCount++
 	}
-	if *listMode {
+	if *shellCmd {
 		modsCount++
 	}
-	if *killMode {
+	if *listCmd {
+		modsCount++
+	}
+	if *killCmd {
+		modsCount++
+	}
+	if *serverCmd {
 		modsCount++
 	}
 	if modsCount != 1 {
-		log.Fatal(fmt.Errorf("You must specify one mode among 'new', 'add', 'detach', 'resume' and 'kill'"))
+		log.Fatal(fmt.Errorf("You must specify one mode among 'new', 'add', 'detach', 'resume', 'kill', 'shell' and 'server'"))
 	}
 	// Ensure only one mode is selected
 
-	if *newMode != "" {
-		if err := createGroup(*newMode, conf); err != nil {
-			log.Fatal(fmt.Errorf("Error creating new sessions group: %w", err))
+	if *createCmd != "" {
+		if err := createAction(*createCmd, *hostFlag); err != nil {
+			log.Fatal(fmt.Errorf("Error creating group: %w", err))
 		}
 	}
-	if *addMode {
-		if err := addWindow(pref); err != nil {
+	if *addCmd {
+		if err := addAction(); err != nil {
 			log.Fatal(fmt.Errorf("Error adding window: %w", err))
 		}
 	}
-	if *detachMode {
-		if err := detachSessionGroup(); err != nil {
+	if *detachCmd {
+		if err := detachAction(); err != nil {
 			log.Fatal(fmt.Errorf("Error detaching group: %w", err))
 		}
 	}
-	if *resumeMode != "" {
+	if *resumeCmd != "" {
 		if pref.Terminal.Bin == "" || pref.Terminal.NameFlag == "" {
 			log.Fatal(fmt.Errorf("You must specify the 'terminal' and 'nameFlag'"))
 		}
-		if err := resumeSessionGroup(pref, conf); err != nil {
+		if err := resumeAction(*resumeCmd, *hostFlag); err != nil {
 			log.Fatal(fmt.Errorf("Error resuming group: %w", err))
 		}
 	}
-	if *listMode {
-		err := listSessionsGroup(conf)
+	if *shellCmd {
+		if *sessionFlag == "" {
+			log.Fatal(fmt.Errorf("You must specify the target session"))
+		}
+		err := shellAction(*sessionFlag, *hostFlag)
 		if err != nil {
-			errMsg := fmt.Sprintf("Error listing group: %s", err)
-			if errors.Is(err, TmuxNoSessionsError) {
-				errMsg += "\nHint: maybe you have no sessions yet?"
-			}
+			errMsg := fmt.Sprintf("Error starting shell for %s: %s", *sessionFlag, err)
 			log.Fatal(fmt.Errorf(errMsg))
 		}
 	}
-	if *killMode {
-		if err := killSessionMode(); err != nil {
+	if *listCmd {
+		err := listAction(*hostFlag)
+		if err != nil {
+			errMsg := fmt.Sprintf("Error listing group: %s", err)
+			log.Fatal(fmt.Errorf(errMsg))
+		}
+	}
+	if *killCmd {
+		if err := killAction(); err != nil {
 			log.Fatal(fmt.Errorf("Error killing session: %w", err))
+		}
+	}
+	if *serverCmd {
+		if err := serverAction(); err != nil {
+			log.Fatal(fmt.Errorf("Error spawning server: %w", err))
 		}
 	}
 }
