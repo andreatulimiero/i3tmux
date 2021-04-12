@@ -285,7 +285,7 @@ func main() {
 		}
 	}
 	if *resumeMode != "" {
-		if *terminalBinFlag == "" || *terminalNameFlag == "" {
+		if pref.Terminal.Bin == "" || pref.Terminal.NameFlag == "" {
 			log.Fatal(fmt.Errorf("You must specify the 'terminal' and 'nameFlag'"))
 		}
 		if err := resumeSessionGroup(pref, conf); err != nil {
