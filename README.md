@@ -1,3 +1,5 @@
+[![GitHub Actions CI](https://github.com/andreatulimiero/i3tmux/actions/workflows/go.yml/badge.svg)](https://github.com/andreatulimiero/i3tmux/actions/workflows/go.yml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/andreatulimiero/i3tmux)](https://goreportcard.com/report/github.com/andreatulimiero/i3tmux)
 # i3tmux
 _i3wm_ and _tmux_ in a seamless experience.
 
