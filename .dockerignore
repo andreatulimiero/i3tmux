@@ -1,4 +1,7 @@
+.git/
 i3tmux
+*.Dockerfile
+
 *.swp
 *.*un~
 tags

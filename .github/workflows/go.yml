@@ -9,7 +9,7 @@ on:
 jobs:
 
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-18.04
     steps:
     - uses: actions/checkout@v2
 
@@ -19,7 +19,7 @@ jobs:
         go-version: 1.16
 
     - name: Build
-      run: make build
+      run: make -j 2 build
 
     - name: Test
       run: make test

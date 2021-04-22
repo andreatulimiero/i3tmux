@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	"log"
+	"os/exec"
 	"sort"
 	"strconv"
 	"strings"
@@ -52,35 +52,6 @@ func deserializeGroupSessFromCon(con *i3.Node) (string, string, error) {
 	return deserializeGroupSessFromString(con.WindowProperties.Instance)
 }
 
-func fetchSessionsPerGroup(conf *Conf) (SessionsPerGroup, error) {
-	client, err := NewClient(conf)
-	if err != nil {
-		return nil, fmt.Errorf("unable to create client: %w", err)
-	}
-	stdout, stderr, err := client.Run(`tmux ls -F "#{session_name}"`)
-	if err != nil {
-		if strings.Contains(stderr, "no server running on ") ||
-			strings.Contains(stderr, "No such file or directory") {
-			return nil, TmuxNoSessionsError
-		}
-		return nil, fmt.Errorf("%s: %w", stderr, err)
-	}
-	lines := strings.Split(stdout, "\n")
-	sessionsPerGroup := make(map[string]map[string]bool)
-	for _, l := range lines {
-		group, session, err := deserializeGroupSessFromString(l)
-		if err != nil {
-			// Skip unrecognized format
-			continue
-		}
-		if _, ok := sessionsPerGroup[group]; !ok {
-			sessionsPerGroup[group] = make(map[string]bool)
-		}
-		sessionsPerGroup[group][session] = true
-	}
-	return sessionsPerGroup, nil
-}
-
 func getNextSessIdx(sessionsPerGroup SessionsPerGroup, group string) (int, error) {
 	sessions := sessionsPerGroup[group]
 	var idxs []int
@@ -104,61 +75,54 @@ func getNextSessIdx(sessionsPerGroup SessionsPerGroup, group string) (int, error
 	return len(sessions), nil
 }
 
-func launchTermForSession(group, session string, pref *Pref, conf *Conf) error {
-	sshCmd := fmt.Sprintf("ssh %s@%s -p %d -i %s -t tmux attach -t %s",
-		conf.user,
-		conf.hostname,
-		conf.portNo,
-		conf.identityFile,
-		serializeGroupSess(group, session))
-	log.Println(sshCmd)
-	i3cmd := fmt.Sprintf("exec %s %s '%s' %s",
-		pref.Terminal.Bin,
-		pref.Terminal.NameFlag,
-		serializeHostGroupSess(conf.host, group, session),
-		sshCmd)
-	_, err := i3.RunCommand(i3cmd)
-	return err
-}
-
-func addSessionToGroup(group string, conf *Conf) (string, error) {
-	sessionsPerGroup, err := fetchSessionsPerGroup(conf)
+func launchTermForSession(group, session, host string) error {
+	groupSess := serializeGroupSess(group, session)
+	hostGroupSess := serializeHostGroupSess(host, group, session)
+	cmd := exec.Command(pref.Terminal.Bin,
+		pref.Terminal.NameFlag, hostGroupSess,
+		"-e", I3TMUX_BIN,
+		"-host", host,
+		"-shell",
+		"-session", groupSess)
+	err := cmd.Start()
 	if err != nil {
-		return "", err
-	}
-	nextSessIdx, err := getNextSessIdx(sessionsPerGroup, group)
-	if err != nil {
-		return "", err
-	}
-	nextSess := fmt.Sprintf("session%d", nextSessIdx)
-	log.Println("Adding session to group", group, nextSess)
-	err = createSession(group, nextSess, conf)
-	if err != nil {
-		return "", err
-	}
-	return nextSess, nil
-}
-
-func createSession(group, sess string, conf *Conf) error {
-	client, err := NewClient(conf)
-	if err != nil {
-		return fmt.Errorf("unable to create client: %w", err)
-	}
-	cmd := fmt.Sprintf("tmux new -d -s %s", serializeGroupSess(group, sess))
-	_, _, err = client.Run(cmd)
-	return err
-}
-
-func killSession(group, sess string, conf *Conf) error {
-	client, err := NewClient(conf)
-	if err != nil {
-		return fmt.Errorf("unable to create client: %w", err)
-	}
-	groupSess := serializeGroupSess(group, sess)
-	cmd := fmt.Sprintf("tmux kill-session -t %s", groupSess)
-	_, stderr, err := client.Run(cmd)
-	if err != nil {
-		return fmt.Errorf("unable to execute remote cmd: %s, %s, %w", cmd, stderr, err)
+		return fmt.Errorf("launching cmd %s: %w", cmd, err)
 	}
 	return nil
+}
+
+func parseSessionsPerGroup(lines []string) SessionsPerGroup {
+	sessions := make(SessionsPerGroup)
+	for _, l := range lines {
+		group, session, err := deserializeGroupSessFromString(l)
+		if err != nil {
+			// Skip unrecognized format
+			continue
+		}
+		if _, ok := sessions[group]; !ok {
+			sessions[group] = make(map[string]bool)
+		}
+		sessions[group][session] = true
+	}
+	return sessions
+}
+
+func fetchSessionsPerGroup(sshClient *SSHClient) (SessionsPerGroup, int, string) {
+	stdout, stderr, err := sshClient.Run(`tmux ls -F "#{session_name}"`)
+	if err != nil {
+		if strings.Contains(stderr, "no server running on ") ||
+			strings.Contains(stderr, "No such file or directory") {
+			// return nil, TmuxNoSessionsError
+			return nil, TmuxNoSessionsError, stderr
+		}
+		return nil, UnknownError, fmt.Sprintf("%s: %s", stderr, err)
+	}
+	lines := strings.Split(stdout, "\n")
+	return parseSessionsPerGroup(lines), ErrOk, ""
+}
+
+func createSession(group, session string, sshClient *SSHClient) (string, string, error) {
+	sessionGroup := serializeGroupSess(group, session)
+	cmd := fmt.Sprintf("tmux new -d -s %s", sessionGroup)
+	return sshClient.Run(cmd)
 }
