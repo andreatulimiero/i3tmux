@@ -13,20 +13,16 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
-var (
-	CONF_PATH = path.Join(os.Getenv("HOME"), ".ssh", "config")
-)
-
 type Conf struct {
-	Host         string
-	Hostname     string
-	PortNo       int
-	User         string
-	IdentityFile string
+	host         string
+	hostname     string
+	portNo       int
+	user         string
+	identityFile string
 }
 
 func getConfForHost(host string) (*Conf, error) {
-	sshConfFile, err := os.Open(CONF_PATH)
+	sshConfFile, err := os.Open(path.Join(os.Getenv("HOME"), ".ssh", "config"))
 	if err != nil {
 		return nil, err
 	}
@@ -40,9 +36,9 @@ func getConfForHost(host string) (*Conf, error) {
 		return nil, err
 	}
 	conf := &Conf{
-		Host:   host,
-		User:   user.Username,
-		PortNo: 22,
+		host:   host,
+		user:   user.Username,
+		portNo: 22,
 	}
 
 	hostname, err := sshConf.Get(host, "Hostname")
@@ -52,7 +48,7 @@ func getConfForHost(host string) (*Conf, error) {
 	if hostname == "" {
 		return nil, fmt.Errorf("Hostname must not be empty.\nHint: is %s present in config?", host)
 	}
-	conf.Hostname = hostname
+	conf.hostname = hostname
 
 	portNoStr, err := sshConf.Get(host, "Port")
 	if err != nil {
@@ -63,7 +59,7 @@ func getConfForHost(host string) (*Conf, error) {
 		if err != nil {
 			return nil, err
 		}
-		conf.PortNo = portNo
+		conf.portNo = portNo
 	}
 
 	userName, err := sshConf.Get(host, "User")
@@ -71,7 +67,7 @@ func getConfForHost(host string) (*Conf, error) {
 		return nil, err
 	}
 	if userName != "" {
-		conf.User = userName
+		conf.user = userName
 	}
 
 	identityFile, err := sshConf.Get(host, "IdentityFile")
@@ -84,7 +80,7 @@ func getConfForHost(host string) (*Conf, error) {
 	if strings.HasPrefix(identityFile, "~/") {
 		identityFile = path.Join(user.HomeDir, identityFile[2:])
 	}
-	conf.IdentityFile = identityFile
+	conf.identityFile = identityFile
 
 	return conf, nil
 }
@@ -97,7 +93,7 @@ type Pref struct {
 	}
 }
 
-func getUserPreferences() Pref {
+func getUserPreferences() *Pref {
 	pref := Pref{}
 	dotFilePath := path.Join(os.Getenv("HOME"), ".config", "i3tmux", "config.yaml")
 	dotFile, err := os.ReadFile(dotFilePath)
@@ -116,5 +112,5 @@ func getUserPreferences() Pref {
 	if *terminalNameFlag != "" {
 		pref.Terminal.NameFlag = *terminalNameFlag
 	}
-	return pref
+	return &pref
 }
