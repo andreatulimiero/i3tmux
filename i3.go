@@ -31,6 +31,9 @@ func nodeIsLeaf(n *i3.Node) bool {
 	return n.Type == i3.Con && len(n.Nodes) == 0
 }
 
+// getTreeOfGroupSess traverses the tree of nodes u
+// looking for i3tmux sessions
+// FIXME: look for windows beloning to a host only
 func getTreeOfGroupSess(u *i3.Node) map[string]interface{} {
 	if nodeIsLeaf(u) {
 		host, group, session, err := deserializeHostGroupSessFromCon(u)

@@ -7,10 +7,8 @@ import (
 	"golang.org/x/term"
 	"io/ioutil"
 	"log"
-	// "log/syslog"
 	"os"
 	"os/signal"
-	"os/user"
 	"path"
 	"regexp"
 	"syscall"
@@ -18,10 +16,8 @@ import (
 	"go.i3wm.org/i3/v4"
 )
 
-const (
-	GROUP_SESS_DELIM = "_"
-	HOST_DELIM       = "@"
-	I3TMUX_BIN       = "i3tmux"
+var (
+	I3TMUX_BIN = ""
 )
 
 var (
@@ -45,34 +41,6 @@ var (
 
 type SessionsPerGroup map[string]Sessions
 type Sessions map[string]bool
-
-func init() {
-	// logwriter, err := syslog.New(syslog.LOG_INFO, "i3tmux")
-	// if err != nil {
-	// log.Fatal(err)
-	// }
-	// log.SetOutput(logwriter)
-	// Set logger to use syslog
-	log.SetFlags(log.LstdFlags | log.Lshortfile)
-
-	user, err := user.Current()
-	if err != nil {
-		log.Fatal(err)
-	}
-	workingDir := path.Join(user.HomeDir, ".local", "share", "i3tmux")
-	err = os.Chdir(workingDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			err = os.MkdirAll(workingDir, 0755)
-			if err != nil {
-				log.Fatal(err)
-			}
-		} else {
-			log.Fatal(err)
-		}
-	}
-	// Chdir to ~/.config/i3tmux/
-}
 
 func createAction(group, host string) error {
 	client, err := newClient()
@@ -186,7 +154,7 @@ func detachAction() error {
 	if err != nil {
 		return err
 	}
-	err = ioutil.WriteFile(group+".json", j, 0644)
+	err = ioutil.WriteFile(path.Join(DATA_DIR, group+".json"), j, 0644)
 	if err != nil {
 		return err
 	}
@@ -199,7 +167,7 @@ func detachAction() error {
 }
 
 func resumeAction(group, host string) error {
-	fmt.Println("Retrieving available sessions groups ...")
+	fmt.Println("Resuming sessions ...")
 	client, err := newClient()
 	if err != nil {
 		return err
@@ -299,12 +267,32 @@ func serverAction() error {
 	return s.Run()
 }
 
-func main() {
+func initLogger() error {
+	logFile, err := os.OpenFile(LOG_FILE, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("opening file for log: %s", err)
+	}
+	log.SetOutput(logFile)
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
+	return nil
+}
+
+func setUpBasics() error {
+	I3TMUX_BIN = os.Args[0]
+	if err := ensureBaseDirs(); err != nil {
+		return err
+	}
+	if err := initLogger(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func parseFlags() {
 	flag.Parse()
-	pref = getUserPreferences()
 	if *createCmd != "" || *resumeCmd != "" || *listCmd || *shellCmd {
 		if *hostFlag == "" {
-			log.Fatal(fmt.Errorf("You must specify the target host"))
+			fmt.Println("You must specify the target host")
 		}
 	}
 
@@ -334,31 +322,40 @@ func main() {
 		modsCount++
 	}
 	if modsCount != 1 {
-		log.Fatal(fmt.Errorf("You must specify one mode among 'new', 'add', 'detach', 'resume', 'kill', 'shell' and 'server'"))
+		fmt.Println("You must specify one mode among 'new', 'add', 'detach', 'resume', 'kill', 'shell' and 'server'")
 	}
 	// Ensure only one mode is selected
+}
+
+func main() {
+	if err := setUpBasics(); err != nil {
+		log.Fatal("Error performing initial setup: ", err)
+	}
+
+	parseFlags()
+	pref = getUserPreferences()
 
 	if *createCmd != "" {
 		if err := createAction(*createCmd, *hostFlag); err != nil {
-			log.Fatal(fmt.Errorf("Error creating group: %w", err))
+			fmt.Printf("Error creating group: %s\n", err)
 		}
 	}
 	if *addCmd {
 		if err := addAction(); err != nil {
-			log.Fatal(fmt.Errorf("Error adding window: %w", err))
+			log.Fatal("Error adding window: ", err)
 		}
 	}
 	if *detachCmd {
 		if err := detachAction(); err != nil {
-			log.Fatal(fmt.Errorf("Error detaching group: %w", err))
+			log.Fatal(fmt.Sprintf("Error detaching group: %s", err))
 		}
 	}
 	if *resumeCmd != "" {
 		if pref.Terminal.Bin == "" || pref.Terminal.NameFlag == "" {
-			log.Fatal(fmt.Errorf("You must specify the 'terminal' and 'nameFlag'"))
+			fmt.Println("You must specify 'terminal.bin' and 'terminal.nameFlag' options")
 		}
 		if err := resumeAction(*resumeCmd, *hostFlag); err != nil {
-			log.Fatal(fmt.Errorf("Error resuming group: %w", err))
+			fmt.Printf("Error resuming group: %s\n", err)
 		}
 	}
 	if *shellCmd {
@@ -367,8 +364,7 @@ func main() {
 		}
 		err := shellAction(*sessionFlag, *hostFlag)
 		if err != nil {
-			errMsg := fmt.Sprintf("Error starting shell for %s: %s", *sessionFlag, err)
-			log.Fatal(fmt.Errorf(errMsg))
+			log.Fatal(fmt.Sprintf("Error starting shell for %s: %s", *sessionFlag, err))
 		}
 	}
 	if *listCmd {
@@ -385,7 +381,7 @@ func main() {
 	}
 	if *serverCmd {
 		if err := serverAction(); err != nil {
-			log.Fatal(fmt.Errorf("Error spawning server: %w", err))
+			log.Fatal("Error spawning server: ", err)
 		}
 	}
 }

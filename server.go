@@ -7,13 +7,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
-	"path"
 	"syscall"
-)
-
-var (
-	SERVER_SOCK_DIR  = path.Join(os.Getenv("HOME"), ".cache", "i3tmux")
-	SERVER_SOCK_PATH = path.Join(SERVER_SOCK_DIR, "i3tmux.sock")
 )
 
 type Server struct{}
@@ -23,11 +17,11 @@ func newServer() *Server {
 }
 
 func (s *Server) Run() error {
-	_, err := os.Stat(SERVER_SOCK_DIR)
+	_, err := os.Stat(SERVER_SOCK)
 	if err != nil {
 		if os.IsNotExist(err) {
 			fmt.Println("Creating directory for server socket ...")
-			err = os.MkdirAll(SERVER_SOCK_DIR, 0700)
+			err = os.MkdirAll(SERVER_SOCK, 0700)
 			if err != nil {
 				return fmt.Errorf("creating directory for server socket: %w", err)
 			}
@@ -45,10 +39,10 @@ func (s *Server) Run() error {
 		s.Stop()
 	}()
 
-	os.Remove(SERVER_SOCK_PATH)
-	listener, err := net.Listen("unix", SERVER_SOCK_PATH)
+	os.Remove(SERVER_SOCK)
+	listener, err := net.Listen("unix", SERVER_SOCK)
 	if err != nil {
-		return fmt.Errorf("listening on socket file %s: %w", SERVER_SOCK_PATH, err)
+		return fmt.Errorf("listening on socket file %s: %w", SERVER_SOCK, err)
 	}
 	defer listener.Close()
 	log.Println("Listening for connections ...")
@@ -63,7 +57,7 @@ func (s *Server) Run() error {
 
 func (s *Server) Stop() {
 	log.Println("Stopping server ...")
-	if err := os.Remove(SERVER_SOCK_PATH); err != nil {
+	if err := os.Remove(SERVER_SOCK); err != nil {
 		log.Fatal(err)
 	}
 	log.Println("Stopped server")
@@ -87,7 +81,7 @@ func (s *Server) handleClient(conn net.Conn) {
 		host := r.GetHost()
 		sshClient, ok := sshClients[host]
 		if !ok {
-			log.Println("Creating client for ", host)
+			log.Println("Creating client for", host)
 			sshClient, err = newSSHClient(host)
 			if err != nil {
 				log.Println(fmt.Errorf("Error creating client: %w", err))

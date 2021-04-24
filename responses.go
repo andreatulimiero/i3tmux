@@ -80,7 +80,7 @@ type ResponseResume struct {
 }
 
 func (r *ResponseResume) Do(client *Client, host string) error {
-	resumeLayoutPath := r.Group + ".json"
+	resumeLayoutPath := path.Join(DATA_DIR, r.Group+".json")
 	_, err := os.Stat(resumeLayoutPath)
 	if err != nil {
 		if !os.IsNotExist(err) {
@@ -88,12 +88,7 @@ func (r *ResponseResume) Do(client *Client, host string) error {
 			return fmt.Errorf("opening saved layout: %s", err)
 		}
 	} else {
-		cwd, err := os.Getwd()
-		if err != nil {
-			return err
-		}
-		absResumeLayoutPath := path.Join(cwd, resumeLayoutPath)
-		_, err = i3.RunCommand(fmt.Sprintf("append_layout %s", absResumeLayoutPath))
+		_, err = i3.RunCommand(fmt.Sprintf("append_layout %s", resumeLayoutPath))
 		if err != nil {
 			return fmt.Errorf("appending i3 layout: %w", err)
 		}

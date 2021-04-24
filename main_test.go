@@ -114,13 +114,15 @@ func (e *Environment) StartSuccess(command ...string) {
 	}
 }
 
-func checkOutput(t *testing.T, out []byte) {
+func checkOutput(t *testing.T, out []byte, e *Environment) {
 	expected, err := ioutil.ReadFile(path.Join(TESTS_DIR, t.Name()))
 	if err != nil {
 		panic(err)
 	}
 	if bytes.Compare(out, expected) != 0 {
 		t.Errorf("expected:\n%s\nreceived:\n%s\n", string(expected), string(out))
+		logs := string(e.RunSuccess("cat", "/var/run/i3tmux/i3tmux.log"))
+		t.Log("Logs:\n", logs)
 	}
 }
 
@@ -145,8 +147,8 @@ func TestNoGroups(t *testing.T) {
 	e := newEnvironment()
 	defer e.Close()
 
-	out := e.RunSuccess(I3TMUX_BIN, "-host", SSH_HOSTNAME, "-list")
-	checkOutput(t, out)
+	out := e.RunSuccess(I3TMUX, "-host", SSH_HOSTNAME, "-list")
+	checkOutput(t, out, e)
 }
 
 func TestCreateGroup(t *testing.T) {
@@ -154,9 +156,9 @@ func TestCreateGroup(t *testing.T) {
 	e := newEnvironment()
 	defer e.Close()
 
-	e.RunSuccess(I3TMUX_BIN, "-host", SSH_HOSTNAME, "-create", "foo")
-	out := e.RunSuccess(I3TMUX_BIN, "-host", SSH_HOSTNAME, "-list")
-	checkOutput(t, out)
+	e.RunSuccess(I3TMUX, "-host", SSH_HOSTNAME, "-create", "foo")
+	out := e.RunSuccess(I3TMUX, "-host", SSH_HOSTNAME, "-list")
+	checkOutput(t, out, e)
 }
 
 func TestResumeGroupWithSingleSession(t *testing.T) {
@@ -165,10 +167,10 @@ func TestResumeGroupWithSingleSession(t *testing.T) {
 	defer e.Close()
 
 	e.StartSuccess("i3")
-	e.RunSuccess(I3TMUX_BIN, "-host", SSH_HOSTNAME, "-create", "foo")
-	e.RunSuccess(I3TMUX_BIN, "-host", SSH_HOSTNAME, "-resume", "foo")
+	e.RunSuccess(I3TMUX, "-host", SSH_HOSTNAME, "-create", "foo")
+	e.RunSuccess(I3TMUX, "-host", SSH_HOSTNAME, "-resume", "foo")
 	out := e.RunSuccess("i3-save-tree")
-	checkOutput(t, out)
+	checkOutput(t, out, e)
 }
 
 func TestAddSessionToGroup(t *testing.T) {
@@ -177,11 +179,11 @@ func TestAddSessionToGroup(t *testing.T) {
 	defer e.Close()
 
 	e.StartSuccess("i3")
-	e.RunSuccess(I3TMUX_BIN, "-host", SSH_HOSTNAME, "-create", "foo")
-	e.RunSuccess(I3TMUX_BIN, "-host", SSH_HOSTNAME, "-resume", "foo")
-	e.RunSuccess(I3TMUX_BIN, "-host", SSH_HOSTNAME, "-add")
+	e.RunSuccess(I3TMUX, "-host", SSH_HOSTNAME, "-create", "foo")
+	e.RunSuccess(I3TMUX, "-host", SSH_HOSTNAME, "-resume", "foo")
+	e.RunSuccess(I3TMUX, "-host", SSH_HOSTNAME, "-add")
 	out := e.RunSuccess("i3-save-tree")
-	checkOutput(t, out)
+	checkOutput(t, out, e)
 }
 
 func TestKillSessionOfGroup(t *testing.T) {
@@ -190,12 +192,12 @@ func TestKillSessionOfGroup(t *testing.T) {
 	defer e.Close()
 
 	e.StartSuccess("i3")
-	e.RunSuccess(I3TMUX_BIN, "-host", SSH_HOSTNAME, "-create", "foo")
-	e.RunSuccess(I3TMUX_BIN, "-host", SSH_HOSTNAME, "-resume", "foo")
-	e.RunSuccess(I3TMUX_BIN, "-host", SSH_HOSTNAME, "-add")
-	e.RunSuccess(I3TMUX_BIN, "-host", SSH_HOSTNAME, "-kill")
+	e.RunSuccess(I3TMUX, "-host", SSH_HOSTNAME, "-create", "foo")
+	e.RunSuccess(I3TMUX, "-host", SSH_HOSTNAME, "-resume", "foo")
+	e.RunSuccess(I3TMUX, "-host", SSH_HOSTNAME, "-add")
+	e.RunSuccess(I3TMUX, "-host", SSH_HOSTNAME, "-kill")
 	out := e.RunSuccess("i3-save-tree")
-	checkOutput(t, out)
+	checkOutput(t, out, e)
 }
 
 func TestDetachResumeGroup(t *testing.T) {
@@ -204,11 +206,11 @@ func TestDetachResumeGroup(t *testing.T) {
 	defer e.Close()
 
 	e.StartSuccess("i3")
-	e.RunSuccess(I3TMUX_BIN, "-host", SSH_HOSTNAME, "-create", "foo")
-	e.RunSuccess(I3TMUX_BIN, "-host", SSH_HOSTNAME, "-resume", "foo")
-	e.RunSuccess(I3TMUX_BIN, "-host", SSH_HOSTNAME, "-add")
-	e.RunSuccess(I3TMUX_BIN, "-host", SSH_HOSTNAME, "-detach")
-	e.RunSuccess(I3TMUX_BIN, "-host", SSH_HOSTNAME, "-resume", "foo")
+	e.RunSuccess(I3TMUX, "-host", SSH_HOSTNAME, "-create", "foo")
+	e.RunSuccess(I3TMUX, "-host", SSH_HOSTNAME, "-resume", "foo")
+	e.RunSuccess(I3TMUX, "-host", SSH_HOSTNAME, "-add")
+	e.RunSuccess(I3TMUX, "-host", SSH_HOSTNAME, "-detach")
+	e.RunSuccess(I3TMUX, "-host", SSH_HOSTNAME, "-resume", "foo")
 	out := e.RunSuccess("i3-save-tree")
-	checkOutput(t, out)
+	checkOutput(t, out, e)
 }

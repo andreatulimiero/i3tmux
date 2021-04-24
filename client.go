@@ -17,7 +17,7 @@ type Client struct {
 }
 
 func newClient() (*Client, error) {
-	_, err := os.Stat(SERVER_SOCK_PATH)
+	_, err := os.Stat(SERVER_SOCK)
 	if err != nil {
 		if os.IsNotExist(err) {
 			fmt.Println("Server not up, starting it ...")
@@ -31,7 +31,7 @@ func newClient() (*Client, error) {
 			return nil, fmt.Errorf("checking existing of server socket: %w", err)
 		}
 	}
-	_, err = os.Stat(SERVER_SOCK_PATH)
+	_, err = os.Stat(SERVER_SOCK)
 	if err != nil {
 		if os.IsNotExist(err) {
 			log.Fatalf("Server did not start: %s\n", err)
@@ -39,7 +39,7 @@ func newClient() (*Client, error) {
 	}
 	// Check if server socket exists
 
-	conn, err := net.Dial("unix", SERVER_SOCK_PATH)
+	conn, err := net.Dial("unix", SERVER_SOCK)
 	if err != nil {
 		return nil, fmt.Errorf("dialling server: %+v", err)
 	}

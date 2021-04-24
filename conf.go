@@ -13,10 +13,6 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
-var (
-	CONF_PATH = path.Join(os.Getenv("HOME"), ".ssh", "config")
-)
-
 type Conf struct {
 	Host         string
 	Hostname     string
@@ -26,7 +22,7 @@ type Conf struct {
 }
 
 func getConfForHost(host string) (*Conf, error) {
-	sshConfFile, err := os.Open(CONF_PATH)
+	sshConfFile, err := os.Open(SSH_CONF)
 	if err != nil {
 		return nil, err
 	}
