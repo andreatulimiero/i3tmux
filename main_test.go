@@ -15,11 +15,11 @@ import (
 const (
 	TESTS_DIR                  = "tests"
 	POD_BASE_NAME              = "i3tmux-pod"
-	SERVER_IMAGE_TAG           = "i3tmux-server"
-	SERVER_CONTAINER_BASE_NAME = SERVER_IMAGE_TAG
+  SERVER_IMAGE_TAG           = "docker.io/andreatulimiero/i3tmux:i3tmux-server"
+	SERVER_CONTAINER_BASE_NAME = "i3tmux-server"
 	SSH_HOSTNAME               = "i3tmux"
 	CLIENT_IMAGE_TAG           = "i3tmux-client"
-	CLIENT_CONTAINER_BASE_NAME = CLIENT_IMAGE_TAG
+	CLIENT_CONTAINER_BASE_NAME = "i3tmux-client"
 )
 
 var (
