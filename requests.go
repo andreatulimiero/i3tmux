@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"sync/atomic"
 )
 
 var (
@@ -154,12 +155,12 @@ type WindowSize struct {
 }
 
 var (
-	sockCounter = 0
+	sockCounter = uint32(0)
 )
 
 func (r *RequestShell) Do(sshClient *SSHClient, client *Client) Response {
-	fdSockPath := fmt.Sprintf("/tmp/i3tmux-fd%d.sock", sockCounter) // FIXME: Generate random sock path
-	sockCounter += 1
+	fdSockPath := fmt.Sprintf("/tmp/i3tmux-fd%d.sock", sockCounter) // FIXME: Implement better random file generation
+	atomic.AddUint32(&sockCounter, 1)
 	os.Remove(fdSockPath)
 	listener, err := net.Listen("unix", fdSockPath)
 	if err != nil {
