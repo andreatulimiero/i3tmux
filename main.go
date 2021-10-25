@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"golang.org/x/term"
 	"io/ioutil"
 	"log"
 	"os"
@@ -12,6 +11,8 @@ import (
 	"path"
 	"regexp"
 	"syscall"
+
+	"golang.org/x/term"
 
 	"go.i3wm.org/i3/v4"
 )
@@ -183,7 +184,7 @@ func resumeAction(group, host string) error {
 	if errCode != ErrOk {
 		switch errCode {
 		case TmuxNoSessionsError:
-			log.Println("No sessions found")
+			fmt.Println("No sessions found")
 			return nil
 		default:
 			return fmt.Errorf("%s", errMsg)
@@ -221,6 +222,7 @@ func shellAction(session, host string) error {
 	}()
 
 	res, err := client.RequestResponse(&RequestShell{RequestBase{host}, session, w, h})
+	log.Println("Received response from shell", err)
 	if err != nil {
 		return err
 	}
@@ -338,6 +340,9 @@ func main() {
 	if *createCmd != "" {
 		if err := createAction(*createCmd, *hostFlag); err != nil {
 			fmt.Printf("Error creating group: %s\n", err)
+		}
+		if pref.ResumeAfterCreate {
+			*resumeCmd = *createCmd
 		}
 	}
 	if *addCmd {

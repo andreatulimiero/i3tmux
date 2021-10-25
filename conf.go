@@ -91,6 +91,7 @@ type Pref struct {
 		Bin      string
 		NameFlag string `yaml:"nameFlag"`
 	}
+	ResumeAfterCreate bool `yaml:"resumeAfterCreate"`
 }
 
 func getUserPreferences() Pref {
