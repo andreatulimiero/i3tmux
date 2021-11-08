@@ -7,6 +7,9 @@ $(APP_NAME): $(SRC_FILES)
 
 build: $(APP_NAME)
 
+install: $(APP_NAME)
+	go install
+
 $(CONTAINER_IMAGES):
 	podman build -f $(subst i3tmux-,,$@).Dockerfile -t $@
 

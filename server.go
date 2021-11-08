@@ -10,10 +10,28 @@ import (
 	"syscall"
 )
 
+var (
+	sshClients = make(map[string]*SSHClient)
+)
+
 type Server struct{}
 
 func newServer() *Server {
 	return &Server{}
+}
+
+type ServerClient struct {
+	Client
+}
+
+func newServerClient(conn net.Conn) *ServerClient {
+	enc := gob.NewEncoder(conn)
+	dec := gob.NewDecoder(conn)
+	return &ServerClient{Client{conn: conn, enc: enc, dec: dec}}
+}
+
+func (c *ServerClient) Close() {
+	c.conn.Close()
 }
 
 func (s *Server) Run() error {
@@ -40,7 +58,7 @@ func (s *Server) Run() error {
 	}()
 
 	os.Remove(SERVER_SOCK)
-	listener, err := net.Listen("unix", SERVER_SOCK)
+	listener, err := net.Listen("tcp", "localhost:5050")
 	if err != nil {
 		return fmt.Errorf("listening on socket file %s: %w", SERVER_SOCK, err)
 	}
@@ -51,7 +69,7 @@ func (s *Server) Run() error {
 		if err != nil {
 			return fmt.Errorf("accepting client: %w\n", err)
 		}
-		go s.handleClient(conn)
+		go s.handleClient(newServerClient(conn))
 	}
 }
 
@@ -64,40 +82,53 @@ func (s *Server) Stop() {
 	os.Exit(0)
 }
 
-var (
-	sshClients = make(map[string]*SSHClient)
-)
+func ensureSSHClient(host string) (*SSHClient, error) {
+	sshClient, ok := sshClients[host]
+	if ok {
+		return sshClient, nil
+	}
+	log.Println("Creating sshClient for", host)
+	sshClient, err := newSSHClient(host)
+	if err != nil {
+		return nil, err
+	}
+	sshClients[host] = sshClient
+	return sshClient, nil
+}
 
-func (s *Server) handleClient(conn net.Conn) {
-	defer conn.Close()
+func removeSSHClient(host string) {
+	sshClient := sshClients[host]
+	sshClient.Close()
+	delete(sshClients, host)
+}
+
+func (s *Server) handleClient(client *ServerClient) {
+	defer func() {
+		log.Println("Closing connection with client")
+		client.Close()
+	}()
 	var err error
-	enc := gob.NewEncoder(conn)
-	dec := gob.NewDecoder(conn)
 	var r Request
 	for {
-		if err = dec.Decode(&r); err != nil {
+		log.Println("Waiting...")
+		err = client.dec.Decode(&r)
+		if err != nil {
+			log.Println("Error decoding client request", err)
 			return
 		}
-		host := r.GetHost()
-		sshClient, ok := sshClients[host]
-		if !ok {
-			log.Println("Creating client for", host)
-			sshClient, err = newSSHClient(host)
-			if err != nil {
-				log.Println(fmt.Errorf("Error creating client: %w", err))
-				return
+		log.Printf("%T →", r)
+		sshClient, err := ensureSSHClient(r.GetHost())
+		if err != nil {
+			log.Printf("Error ensuring SSHClient: %#v", err)
+			r := (Response)(&ResponseBase{UnknownError, err.Error()})
+			if err = client.enc.Encode(&r); err != nil {
+				log.Printf("Error encoding response: %+v\n", err)
 			}
-			sshClients[host] = sshClient
-			go func() {
-				sshClient.Wait()
-				delete(sshClients, host) // FIXME: Implement mutex for concurrent modification
-			}()
+			return
 		}
-		// defer sshClient.Close()
-		fmt.Println(sshClient)
-		fmt.Println(r)
-		res := r.Do(sshClient, &Client{conn: conn, enc: enc, dec: dec})
-		if err = enc.Encode(&res); err != nil {
+		res := r.Do(sshClient, client)
+		log.Printf("%T ←", res)
+		if err = client.enc.Encode(&res); err != nil {
 			log.Printf("Error encoding response: %+v\n", err)
 		}
 	}

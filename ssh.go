@@ -2,10 +2,19 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
+	"log"
+	"time"
+
 	"golang.org/x/crypto/ssh"
+
 	"io/ioutil"
-	"os"
+	"net"
+)
+
+const (
+	TCP_USER_TIMEOUT_VALUE = 5 // in sec
 )
 
 type SSHClient struct {
@@ -33,14 +42,48 @@ func newSSHClient(host string) (*SSHClient, error) {
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 		// FIXME: check server's key
 	}
-	conn, err := ssh.Dial("tcp", fmt.Sprintf("%s:%d", conf.Hostname, conf.PortNo), config)
+
+	var d net.Dialer
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	serverAddr := fmt.Sprintf("%s:%d", conf.Hostname, conf.PortNo)
+	conn, err := d.DialContext(ctx, "tcp", serverAddr)
 	if err != nil {
-		return nil, fmt.Errorf("unable to dial: %w", err)
+		return nil, err
 	}
-	return &SSHClient{conn}, nil
+
+	sshConn, newChan, reqChan, err := ssh.NewClientConn(conn, serverAddr, config)
+	client := ssh.NewClient(sshConn, newChan, reqChan)
+
+	go func() {
+		keepaliveInterval := 1000 * time.Millisecond
+		keepaliveTimeout := 500 * time.Millisecond
+		ticker := time.NewTicker(keepaliveInterval)
+		for {
+			<-ticker.C
+			err := conn.SetDeadline(time.Now().Add(keepaliveTimeout))
+			if err != nil {
+				log.Printf("failed to set deadline, connection might be closed: %#v", err)
+				return
+			}
+			_, _, err = client.SendRequest("keepalive@andreatulimiero.com", true, nil)
+			if err != nil {
+				log.Printf("Error sending keepalive request: %#v", err)
+				return
+			}
+			err = conn.SetDeadline(time.Time{})
+			if err != nil {
+				log.Printf("failed to reset deadline, connection might be closed: %v", err)
+				return
+			}
+		}
+	}()
+
+	return &SSHClient{client}, nil
 }
 
 func (c *SSHClient) Run(cmd string) (string, string, error) {
+	// Handy function to run a cmd remotely and get the answer
 	session, err := c.NewSession()
 	if err != nil {
 		return "", "", fmt.Errorf("unable to create session: %w", err)
@@ -52,47 +95,4 @@ func (c *SSHClient) Run(cmd string) (string, string, error) {
 	session.Stderr = &stderr
 	err = session.Run(cmd)
 	return stdout.String(), stderr.String(), err
-}
-
-func (c *SSHClient) Shell(files []*os.File) error {
-	session, err := c.NewSession()
-	if err != nil {
-		return fmt.Errorf("unable to create session: %w", err)
-	}
-	defer session.Close()
-
-	modes := ssh.TerminalModes{
-		ssh.ECHO:          1,     // disable echoing
-		ssh.TTY_OP_ISPEED: 14400, // input speed = 14.4kbaud
-		ssh.TTY_OP_OSPEED: 14400, // output speed = 14.4kbaud
-	}
-	// FIXME: Retrieve real width and height of the terminal
-	// w, h, err := term.GetSize(fd)
-	// if err != nil {
-	// return fmt.Errorf("getting terminal width and height: %w", err)
-	// }
-	if err := session.RequestPty("xterm-256color", 40, 80, modes); err != nil {
-		return fmt.Errorf("request for pseudo terminal failed: %w", err)
-	}
-
-	session.Stdout = files[0]
-	session.Stderr = files[1]
-	session.Stdin = files[2]
-
-	// Start remote shell
-	fmt.Println("Starting shell")
-	if err := session.Shell(); err != nil {
-		return fmt.Errorf("failed to start shell: %w", err)
-	}
-
-	if err := session.Wait(); err != nil {
-		if e, ok := err.(*ssh.ExitError); ok {
-			switch e.ExitStatus() {
-			case 130:
-				return nil
-			}
-		}
-		return fmt.Errorf("ssh: %s", err)
-	}
-	return nil
 }

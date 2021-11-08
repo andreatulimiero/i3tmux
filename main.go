@@ -67,7 +67,7 @@ func createAction(group, host string) error {
 	// Receive response
 
 	log.Println("Created new sessions group")
-	return res.Do(client, host)
+	return res.Do(client, host, "")
 }
 
 func addAction() error {
@@ -102,7 +102,7 @@ func addAction() error {
 	}
 	// Receive response
 
-	return res.Do(client, host)
+	return res.Do(client, host, "")
 }
 
 func listAction(host string) error {
@@ -130,7 +130,7 @@ func listAction(host string) error {
 	}
 	// Receive response
 
-	return res.Do(client, host)
+	return res.Do(client, host, "")
 }
 
 func detachAction() error {
@@ -184,14 +184,14 @@ func resumeAction(group, host string) error {
 	if errCode != ErrOk {
 		switch errCode {
 		case TmuxNoSessionsError:
-			fmt.Println("No sessions found")
+			fmt.Println("No session found")
 			return nil
 		default:
 			return fmt.Errorf("%s", errMsg)
 		}
 	}
 	// Receive response
-	return res.Do(client, host)
+	return res.Do(client, host, "")
 }
 
 func shellAction(session, host string) error {
@@ -222,11 +222,10 @@ func shellAction(session, host string) error {
 	}()
 
 	res, err := client.RequestResponse(&RequestShell{RequestBase{host}, session, w, h})
-	log.Println("Received response from shell", err)
 	if err != nil {
 		return err
 	}
-	return res.Do(client, host)
+	return res.Do(client, host, session)
 }
 
 func killAction() error {

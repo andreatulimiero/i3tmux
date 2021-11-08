@@ -3,12 +3,14 @@ package main
 import (
 	"encoding/gob"
 	"fmt"
-	"golang.org/x/crypto/ssh"
 	"log"
 	"net"
 	"os"
 	"strings"
 	"sync/atomic"
+	"time"
+
+	"golang.org/x/crypto/ssh"
 )
 
 var (
@@ -20,7 +22,7 @@ var (
 )
 
 type Request interface {
-	Do(*SSHClient, *Client) Response
+	Do(*SSHClient, *ServerClient) Response
 	GetHost() string
 }
 
@@ -39,7 +41,7 @@ type RequestList struct {
 	RequestBase
 }
 
-func (r *RequestList) Do(sshClient *SSHClient, client *Client) Response {
+func (r *RequestList) Do(sshClient *SSHClient, client *ServerClient) Response {
 	sessionsPerGroup, errCode, errMsg := fetchSessionsPerGroup(sshClient)
 	if errCode != ErrOk {
 		return newErrorResponse(errCode, errMsg)
@@ -54,7 +56,7 @@ type RequestCreate struct {
 	Group string
 }
 
-func (r *RequestCreate) Do(sshClient *SSHClient, client *Client) Response {
+func (r *RequestCreate) Do(sshClient *SSHClient, client *ServerClient) Response {
 	if strings.Contains(r.Group, GROUP_SESS_DELIM) {
 		// errMsg := fmt.Sprintf("group name cannot contain '%s'", GROUP_SESS_DELIM)
 		return newErrorResponse(InvalidGroupNameError, "")
@@ -83,7 +85,7 @@ type RequestAdd struct {
 	Group string
 }
 
-func (r *RequestAdd) Do(sshClient *SSHClient, client *Client) Response {
+func (r *RequestAdd) Do(sshClient *SSHClient, client *ServerClient) Response {
 	sessionsPerGroup, errCode, errMsg := fetchSessionsPerGroup(sshClient)
 	if errCode != ErrOk {
 		return newErrorResponse(errCode, errMsg)
@@ -108,7 +110,7 @@ type RequestResume struct {
 	Group string
 }
 
-func (r *RequestResume) Do(sshClient *SSHClient, client *Client) Response {
+func (r *RequestResume) Do(sshClient *SSHClient, client *ServerClient) Response {
 	sessionsPerGroup, errCode, errMsg := fetchSessionsPerGroup(sshClient)
 	if errCode != ErrOk {
 		return newErrorResponse(errCode, errMsg)
@@ -128,7 +130,7 @@ type RequestKill struct {
 	Sess  string
 }
 
-func (r *RequestKill) Do(sshClient *SSHClient, client *Client) Response {
+func (r *RequestKill) Do(sshClient *SSHClient, client *ServerClient) Response {
 	groupSess := serializeGroupSess(r.Group, r.Sess)
 	cmd := fmt.Sprintf("tmux kill-session -t %s", groupSess)
 	_, stderr, err := sshClient.Run(cmd)
@@ -158,7 +160,8 @@ var (
 	sockCounter = uint32(0)
 )
 
-func (r *RequestShell) Do(sshClient *SSHClient, client *Client) Response {
+func (r *RequestShell) getClientFds(client *ServerClient) (*os.File, *os.File, *os.File, error) {
+	// getClientFsd gets stdin, stdout and stderr from the client
 	fdSockPath := fmt.Sprintf("/tmp/i3tmux-fd%d.sock", sockCounter) // FIXME: Implement better random file generation
 	atomic.AddUint32(&sockCounter, 1)
 	os.Remove(fdSockPath)
@@ -167,55 +170,94 @@ func (r *RequestShell) Do(sshClient *SSHClient, client *Client) Response {
 		log.Fatalf("Unable to listen on socket file %s: %s", fdSockPath, err)
 	}
 	defer listener.Close()
-	// Open socket to received fds
+	// Open socket to receive fds
 
 	res := (Response)(&ResponseShell{FdSockPath: fdSockPath})
 	err = client.enc.Encode(&res)
 	if err != nil {
-		return newErrorResponse(UnknownError, err.Error())
+		return nil, nil, nil, err
 	}
 	// Communicate fdSockPath is ready
 
 	fdConn, err := listener.Accept()
 	if err != nil {
-		return newErrorResponse(UnknownError, fmt.Sprintf("error accepting client: %s", err))
+		return nil, nil, nil, err
 	}
 	defer fdConn.Close()
 	stdin, stdout, stderr, err := RecvFds(fdConn.(*net.UnixConn), 3)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return stdin, stdout, stderr, nil
+}
+
+func (r *RequestShell) Do(sshClient *SSHClient, client *ServerClient) Response {
+	stdin, stdout, stderr, err := r.getClientFds(client)
 	if err != nil {
 		return newErrorResponse(UnknownError, err.Error())
 	}
 	// Get stdin, stdout and stderr of client
 
-	session, err := sshClient.NewSession()
-	if err != nil {
-		return newErrorResponse(UnknownError, err.Error())
-	}
-	defer session.Close()
-
-	// Request pseudo terminal
-	if err := session.RequestPty("xterm-256color", r.Height, r.Width, terminalModes); err != nil {
-		log.Fatal(err)
-	}
-
-	session.Stdin = stdin
-	session.Stdout = stdout
-	session.Stderr = stderr
-
+	var session *ssh.Session
 	go func() {
 		for {
 			var winSize WindowSize
 			if err := client.dec.Decode(&winSize); err != nil {
+				log.Println(err)
 				return
 			}
 			session.WindowChange(winSize.Height, winSize.Width)
 		}
 	}()
-	cmd := fmt.Sprintf("tmux attach-session -d -t %s", r.SessionGroup)
-	if err := session.Run(cmd); err != nil {
-		log.Println(err)
+
+	for {
+		session, err = sshClient.NewSession()
+		if err != nil {
+			return newErrorResponse(UnknownError, err.Error())
+		}
+		if err := session.RequestPty("xterm-256color", r.Height, r.Width, terminalModes); err != nil {
+			log.Fatal(err)
+		}
+		// Request pseudo terminal
+		session.Stdin = stdin
+		session.Stdout = stdout
+		session.Stderr = stderr
+
+		cmd := fmt.Sprintf("tmux attach-session -d -t %s", r.SessionGroup)
+		if err := session.Run(cmd); err != nil {
+			switch err.(type) {
+			case *ssh.ExitMissingError:
+				removeSSHClient(r.GetHost())
+				stdout.Write([]byte("\x1b[2J"))
+				// Clear the terminal content
+				stdout.Write([]byte("\x1b[1;1H"))
+				// Position the cursor at the begiing of the first row
+				lostConnectionTime := time.Now().Format(time.UnixDate)
+				stdout.Write([]byte("Lost connection: " + lostConnectionTime + "\n"))
+				stdout.Write([]byte("\x1b[2;1H"))
+				// Position the cursor at the beginning of the second row
+				stdout.Write([]byte("Retrying "))
+				for {
+					stdout.Write([]byte("."))
+					sshClient, err = ensureSSHClient(r.GetHost())
+					if err == nil {
+						break
+					} else if _, ok := err.(*net.OpError); ok {
+						log.Println("Host still down, retrying in 1s")
+						time.Sleep(1 * time.Second)
+					} else {
+						log.Printf("Unexpected error: %#v", err)
+						return &ResponseBase{UnknownError, err.Error()}
+					}
+				}
+			default:
+				log.Printf("%#v", err)
+				return &ResponseBase{UnknownError, err.Error()}
+			}
+		} else {
+			return &ResponseBase{}
+		}
 	}
-	return &ResponseBase{}
 }
 
 func init() {

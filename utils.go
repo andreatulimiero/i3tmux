@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"os/exec"
 	"sort"
 	"strconv"
@@ -84,6 +85,7 @@ func launchTermForSession(group, session, host string) error {
 		"-host", host,
 		"-shell",
 		"-session", groupSess)
+	log.Printf("%+v", cmd)
 	err := cmd.Start()
 	if err != nil {
 		return fmt.Errorf("launching cmd %s: %w", cmd, err)

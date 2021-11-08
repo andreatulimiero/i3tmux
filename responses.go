@@ -3,11 +3,13 @@ package main
 import (
 	"encoding/gob"
 	"fmt"
-	"go.i3wm.org/i3/v4"
-	"golang.org/x/term"
+	"log"
 	"net"
 	"os"
 	"path"
+
+	"go.i3wm.org/i3/v4"
+	"golang.org/x/term"
 )
 
 const (
@@ -16,12 +18,14 @@ const (
 	GroupAlreadyExistsError = iota
 	GroupNotFoundError      = iota
 	InvalidGroupNameError   = iota
+	ExitMissingErrorError   = iota
+	CannotConnectError      = iota
 	UnknownError            = iota
 )
 
 type Response interface {
 	Error() (int, string)
-	Do(client *Client, host string) error
+	Do(client *Client, host, session string) error
 }
 
 func newErrorResponse(errorCode int, errorMsg string) *ResponseBase {
@@ -39,7 +43,7 @@ func (r *ResponseBase) Error() (int, string) {
 	return r.ErrorCode, r.ErrorMsg
 }
 
-func (r *ResponseBase) Do(client *Client, host string) error {
+func (r *ResponseBase) Do(client *Client, host, session string) error {
 	return nil
 }
 
@@ -50,7 +54,7 @@ type ResponseCreate struct {
 	SessionGroup string
 }
 
-func (r *ResponseCreate) Do(client *Client, host string) error {
+func (r *ResponseCreate) Do(client *Client, host, session string) error {
 	return nil
 }
 
@@ -61,12 +65,9 @@ type ResponseList struct {
 	Sessions SessionsPerGroup
 }
 
-func (r *ResponseList) Do(client *Client, host string) error {
-	for g, sessions := range r.Sessions {
-		fmt.Println(g + ":")
-		for s := range sessions {
-			fmt.Printf("- %s\n", s)
-		}
+func (r *ResponseList) Do(client *Client, host, session string) error {
+	for g, _ := range r.Sessions {
+		fmt.Println("- " + g)
 	}
 	return nil
 }
@@ -79,7 +80,7 @@ type ResponseResume struct {
 	Sessions Sessions
 }
 
-func (r *ResponseResume) Do(client *Client, host string) error {
+func (r *ResponseResume) Do(client *Client, host, session string) error {
 	resumeLayoutPath := path.Join(DATA_DIR, r.Group+".json")
 	_, err := os.Stat(resumeLayoutPath)
 	if err != nil {
@@ -112,7 +113,7 @@ type ResponseAdd struct {
 	Session string
 }
 
-func (r *ResponseAdd) Do(client *Client, host string) error {
+func (r *ResponseAdd) Do(client *Client, host, session string) error {
 	err := launchTermForSession(r.Group, r.Session, host)
 	if err != nil {
 		return fmt.Errorf("launching term for %s: %w", r.Session, err)
@@ -131,11 +132,12 @@ type ResponseShell struct {
 	FdSockPath string
 }
 
-func (r *ResponseShell) Do(client *Client, host string) error {
+func (r *ResponseShell) Do(client *Client, host, session string) error {
 	fdConn, err := net.Dial("unix", r.FdSockPath)
 	if err != nil {
 		return fmt.Errorf("Failed to dial: %w", err)
 	}
+	log.Println("Dialled ", r.FdSockPath)
 	defer fdConn.Close()
 
 	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
@@ -154,7 +156,7 @@ func (r *ResponseShell) Do(client *Client, host string) error {
 	if err != nil {
 		return err
 	}
-	return res.Do(client, host)
+	return res.Do(client, host, session)
 }
 
 func init() {
