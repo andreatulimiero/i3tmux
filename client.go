@@ -27,7 +27,13 @@ func newClient() (*Client, error) {
 		if os.IsNotExist(err) {
 			fmt.Println("Server not up, starting it ...")
 			cmd := exec.Command(I3TMUX_BIN, "-server")
-			err := cmd.Start()
+			outErrFile, err := os.OpenFile(LOG_FILE+".outerr", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+			if err != nil {
+				return nil, err
+			}
+			cmd.Stdout = outErrFile
+			cmd.Stderr = outErrFile
+			err = cmd.Start()
 			if err != nil {
 				return nil, fmt.Errorf("starting server: %w", err)
 			}
@@ -44,7 +50,8 @@ func newClient() (*Client, error) {
 	}
 	// Check if server socket exists
 
-	conn, err := net.Dial("tcp", "localhost:5050")
+	// conn, err := net.Dial("tcp", "localhost:5050")
+	conn, err := net.Dial("unix", SERVER_SOCK)
 	if err != nil {
 		return nil, fmt.Errorf("dialling server: %+v", err)
 	}
@@ -57,7 +64,6 @@ func newClient() (*Client, error) {
 }
 
 func (c *Client) Close() error {
-	log.Printf("Closing client %#v", c.conn)
 	return c.conn.Close()
 }
 

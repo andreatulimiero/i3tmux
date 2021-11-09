@@ -58,7 +58,8 @@ func (s *Server) Run() error {
 	}()
 
 	os.Remove(SERVER_SOCK)
-	listener, err := net.Listen("tcp", "localhost:5050")
+	// listener, err := net.Listen("tcp", "localhost:5050")
+	listener, err := net.Listen("unix", SERVER_SOCK)
 	if err != nil {
 		return fmt.Errorf("listening on socket file %s: %w", SERVER_SOCK, err)
 	}

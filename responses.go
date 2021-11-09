@@ -66,7 +66,7 @@ type ResponseList struct {
 }
 
 func (r *ResponseList) Do(client *Client, host, session string) error {
-	for g, _ := range r.Sessions {
+	for g := range r.Sessions {
 		fmt.Println("- " + g)
 	}
 	return nil

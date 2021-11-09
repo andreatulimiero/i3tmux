@@ -213,9 +213,11 @@ func (r *RequestShell) Do(sshClient *SSHClient, client *ServerClient) Response {
 	for {
 		session, err = sshClient.NewSession()
 		if err != nil {
+			log.Printf("Unexpected error: %#v", err)
 			return newErrorResponse(UnknownError, err.Error())
 		}
 		if err := session.RequestPty("xterm-256color", r.Height, r.Width, terminalModes); err != nil {
+			log.Printf("Unexpected error: %#v", err)
 			log.Fatal(err)
 		}
 		// Request pseudo terminal
