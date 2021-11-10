@@ -98,9 +98,10 @@ func ensureSSHClient(host string) (*SSHClient, error) {
 }
 
 func removeSSHClient(host string) {
-	sshClient := sshClients[host]
-	sshClient.Close()
-	delete(sshClients, host)
+	if sshClient, ok := sshClients[host]; ok {
+		sshClient.Close()
+		delete(sshClients, host)
+	}
 }
 
 func (s *Server) handleClient(client *ServerClient) {
