@@ -56,7 +56,7 @@ func newSSHClient(host string) (*SSHClient, error) {
 	client := ssh.NewClient(sshConn, newChan, reqChan)
 
 	go func() {
-		keepaliveInterval := 1000 * time.Millisecond
+		keepaliveInterval := 5000 * time.Millisecond
 		keepaliveTimeout := 500 * time.Millisecond
 		ticker := time.NewTicker(keepaliveInterval)
 		for {
@@ -66,11 +66,13 @@ func newSSHClient(host string) (*SSHClient, error) {
 				log.Printf("failed to set deadline, connection might be closed: %#v", err)
 				return
 			}
+			start := time.Now()
 			_, _, err = client.SendRequest("keepalive@andreatulimiero.com", true, nil)
 			if err != nil {
 				log.Printf("Error sending keepalive request: %#v", err)
 				return
 			}
+			log.Printf("Keepalive RTT: %s", time.Now().Sub(start))
 			err = conn.SetDeadline(time.Time{})
 			if err != nil {
 				log.Printf("failed to reset deadline, connection might be closed: %v", err)

@@ -7,11 +7,13 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 )
 
 var (
-	sshClients = make(map[string]*SSHClient)
+	sshClients     = make(map[string]*SSHClient)
+	sshClientsLock = sync.RWMutex{}
 )
 
 type Server struct{}
@@ -84,7 +86,7 @@ func (s *Server) Stop() {
 }
 
 func ensureSSHClient(host string) (*SSHClient, error) {
-	sshClient, ok := sshClients[host]
+	sshClient, ok := getSSHClient(host)
 	if ok {
 		return sshClient, nil
 	}
@@ -93,12 +95,31 @@ func ensureSSHClient(host string) (*SSHClient, error) {
 	if err != nil {
 		return nil, err
 	}
-	sshClients[host] = sshClient
+	addSSHClient(host, sshClient)
 	return sshClient, nil
 }
 
+func getSSHClient(host string) (sshClient *SSHClient, ok bool) {
+	sshClientsLock.RLock()
+	defer sshClientsLock.RUnlock()
+
+	sshClient, ok = sshClients[host]
+	return
+}
+
+func addSSHClient(host string, sshClient *SSHClient) {
+	sshClientsLock.Lock()
+	defer sshClientsLock.Unlock()
+
+	sshClients[host] = sshClient
+}
+
 func removeSSHClient(host string) {
-	if sshClient, ok := sshClients[host]; ok {
+	sshClientsLock.Lock()
+	defer sshClientsLock.Unlock()
+
+	sshClient, ok := sshClients[host]
+	if ok {
 		sshClient.Close()
 		delete(sshClients, host)
 	}

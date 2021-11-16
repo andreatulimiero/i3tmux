@@ -199,9 +199,9 @@ func (r *RequestShell) Do(sshClient *SSHClient, client *ServerClient) Response {
 	// Get stdin, stdout and stderr of client
 
 	var session *ssh.Session
+	var winSize WindowSize
 	go func() {
 		for {
-			var winSize WindowSize
 			if err := client.dec.Decode(&winSize); err != nil {
 				log.Println(err)
 				return
@@ -224,6 +224,10 @@ func (r *RequestShell) Do(sshClient *SSHClient, client *ServerClient) Response {
 		session.Stdin = stdin
 		session.Stdout = stdout
 		session.Stderr = stderr
+		if winSize.Height != 0 && winSize.Width != 0 {
+			session.WindowChange(winSize.Height, winSize.Width)
+			// Send a window change request everytime we re-establish a session
+		}
 
 		cmd := fmt.Sprintf("tmux attach-session -d -t %s", r.SessionGroup)
 		if err := session.Run(cmd); err != nil {
