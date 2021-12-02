@@ -206,7 +206,11 @@ func (r *RequestShell) Do(sshClient *SSHClient, client *ServerClient) Response {
 				log.Println(err)
 				return
 			}
-			session.WindowChange(winSize.Height, winSize.Width)
+			if session != nil {
+				// It might be the case that the terminal for the session is visible
+				// but the session has not been established yet
+				session.WindowChange(winSize.Height, winSize.Width)
+			}
 		}
 	}()
 
