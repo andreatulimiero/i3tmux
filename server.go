@@ -86,7 +86,19 @@ func (s *Server) Stop() {
 }
 
 func ensureSSHClient(host string) (*SSHClient, error) {
-	sshClient, ok := getSSHClient(host)
+	// ensureSSHClient ensures that an sshClient is present for host.
+	// Since, this method can be invoked by different callers concurrently,
+	// and we want that an SSHClient is created only once per host, we lock
+	// at the very beginning so that if two calls are performed at the same time,
+	// and an SSHClient does not exist, the following happens:
+	// - the first caller checks for the SSHClient's existence
+	// - creates a new SSHClient since it does not exist
+	// - the new SSHClient is returned
+	// - the second caller checks for the SSHClient's existence
+	// - the SSHClient existence and is returned
+	sshClientsLock.Lock()
+	defer sshClientsLock.Unlock()
+	sshClient, ok := sshClients[host]
 	if ok {
 		return sshClient, nil
 	}
@@ -95,23 +107,8 @@ func ensureSSHClient(host string) (*SSHClient, error) {
 	if err != nil {
 		return nil, err
 	}
-	addSSHClient(host, sshClient)
-	return sshClient, nil
-}
-
-func getSSHClient(host string) (sshClient *SSHClient, ok bool) {
-	sshClientsLock.RLock()
-	defer sshClientsLock.RUnlock()
-
-	sshClient, ok = sshClients[host]
-	return
-}
-
-func addSSHClient(host string, sshClient *SSHClient) {
-	sshClientsLock.Lock()
-	defer sshClientsLock.Unlock()
-
 	sshClients[host] = sshClient
+	return sshClient, nil
 }
 
 func removeSSHClient(host string) {
