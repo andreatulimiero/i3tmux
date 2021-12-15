@@ -95,7 +95,7 @@ func ensureSSHClient(host string) (*SSHClient, error) {
 	// - creates a new SSHClient since it does not exist
 	// - the new SSHClient is returned
 	// - the second caller checks for the SSHClient's existence
-	// - the SSHClient existence and is returned
+	// - the SSHClient exists and it is returned
 	sshClientsLock.Lock()
 	defer sshClientsLock.Unlock()
 	sshClient, ok := sshClients[host]

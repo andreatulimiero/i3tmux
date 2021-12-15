@@ -214,6 +214,7 @@ func (r *RequestShell) Do(sshClient *SSHClient, client *ServerClient) Response {
 		}
 	}()
 
+	lastReconnectionNo := sshClient.reconnectionNo
 	for {
 		session, err = sshClient.NewSession()
 		if err != nil {
@@ -237,29 +238,24 @@ func (r *RequestShell) Do(sshClient *SSHClient, client *ServerClient) Response {
 		if err := session.Run(cmd); err != nil {
 			switch err.(type) {
 			case *ssh.ExitMissingError:
-				removeSSHClient(r.GetHost())
 				stdout.Write([]byte("\x1b[2J"))
 				// Clear the terminal content
 				stdout.Write([]byte("\x1b[1;1H"))
-				// Position the cursor at the begiing of the first row
+				// Position the cursor at the beginning of the first row
 				lostConnectionTime := time.Now().Format(time.UnixDate)
 				stdout.Write([]byte("Lost connection: " + lostConnectionTime + "\n"))
 				stdout.Write([]byte("\x1b[2;1H"))
 				// Position the cursor at the beginning of the second row
 				stdout.Write([]byte("Retrying "))
-				for {
+				for sshClient.reconnectionNo <= lastReconnectionNo {
 					stdout.Write([]byte("."))
-					sshClient, err = ensureSSHClient(r.GetHost())
-					if err == nil {
-						break
-					} else if _, ok := err.(*net.OpError); ok {
-						log.Println("Host still down, retrying in 1s")
-						time.Sleep(1 * time.Second)
-					} else {
-						log.Printf("Unexpected error: %#v", err)
-						return &ResponseBase{UnknownError, err.Error()}
-					}
+					time.Sleep(1 * time.Second)
 				}
+				if sshClient.isClosed {
+					return &ResponseBase{UnknownError, "Couldn't restart reconnecting"}
+					// FIXME: Add correct error
+				}
+				lastReconnectionNo = sshClient.reconnectionNo
 			default:
 				log.Printf("%#v", err)
 				return &ResponseBase{UnknownError, err.Error()}
